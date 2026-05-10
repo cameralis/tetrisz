@@ -37,7 +37,6 @@ const _lineClearSnapParticlesInColumn = TetrisGame.visibleRows * 5;
 const _lineClearSnapWarmUpSize = Size(320, 640);
 const _ghostHdrAuraBoost = 2.0;
 const _ghostHdrOutlineBoost = 2.8;
-const _ghostHdrCoreBoost = 3.4;
 const _horizontalIntentFraction = 0.35;
 const _minHorizontalIntentDistance = 20.0;
 const _snapPreviewFraction = 0.25;
@@ -2489,13 +2488,17 @@ void _drawGhost(
       ..color = tetrisGhostHdrOutlineColorFor(type),
   );
   canvas.drawRRect(
-    rrect.deflate(math.max(0.5, cellSize * 0.045)),
+    rrect.deflate(math.max(0.5, cellSize * 0.04)),
     Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = math.max(0.8, cellSize * 0.035)
+      ..strokeWidth = math.max(0.7, cellSize * 0.028)
       ..strokeJoin = StrokeJoin.round
       ..blendMode = BlendMode.plus
-      ..color = _ghostHdrColorFor(type, alpha: 0.9, boost: _ghostHdrCoreBoost),
+      ..color = _ghostHdrColorFor(
+        type,
+        alpha: 0.36,
+        boost: _ghostHdrOutlineBoost,
+      ),
   );
 }
 
