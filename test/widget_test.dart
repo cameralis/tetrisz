@@ -8,6 +8,7 @@ const _phoneViewport = Size(390, 844);
 const _staleFrameGap = Duration(seconds: 20);
 const _partialSnapDrag = Offset(24, 0);
 const _committingSnapDrag = Offset(34, 0);
+const _snapCommitFraction = 0.7;
 
 void _usePhoneViewport(WidgetTester tester) {
   tester.view.physicalSize = _phoneViewport;
@@ -216,8 +217,12 @@ void main() {
     await gesture.moveBy(_committingSnapDrag);
     await tester.pump();
 
-    expect(game.active!.x, startX);
-    expect(_boardActiveHorizontalOffset(tester), greaterThanOrEqualTo(0.69));
+    final cellWidth = _phoneViewport.width / TetrisGame.width;
+    final residualOffset =
+        (_committingSnapDrag.dx - cellWidth * _snapCommitFraction) / cellWidth;
+
+    expect(game.active!.x, startX + 1);
+    expect(_boardActiveHorizontalOffset(tester), closeTo(residualOffset, 0.01));
 
     await gesture.up();
     await tester.pump();
@@ -227,6 +232,36 @@ void main() {
     expect(_boardActiveHorizontalOffset(tester), 0);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'horizontal drag can snap across multiple columns before release',
+    (tester) async {
+      _usePhoneViewport(tester);
+      final game = _visiblePieceGame(Tetromino.t);
+      final startX = game.active!.x;
+
+      await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
+      await tester.pump();
+
+      final board = find.byKey(const ValueKey('tetris-board'));
+      final gesture = await tester.startGesture(tester.getCenter(board));
+      await gesture.moveBy(_committingSnapDrag);
+      await tester.pump();
+      await gesture.moveBy(_committingSnapDrag);
+      await tester.pump();
+
+      expect(game.active!.x, startX + 2);
+      expect(_boardActiveHorizontalOffset(tester), greaterThan(0));
+
+      await gesture.up();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 140));
+
+      expect(game.active!.x, startX + 2);
+      expect(_boardActiveHorizontalOffset(tester), 0);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('horizontal drag resists blocked wall snaps', (tester) async {
     _usePhoneViewport(tester);

@@ -236,12 +236,27 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     }
 
     _snapBackController.stop();
+    var moved = false;
     setState(() {
+      while (_snapDragX.abs() >= snapDistance) {
+        final direction = _snapDragX.sign.toInt();
+        if (!_canMoveHorizontally(direction)) {
+          break;
+        }
+        _moveHorizontally(direction);
+        _snapDragX -= snapDistance * direction;
+        moved = true;
+      }
+
       final direction = _snapDragX.sign.toInt();
-      final blocked = !_canMoveHorizontally(direction);
+      final blocked = direction != 0 && !_canMoveHorizontally(direction);
       final limit = blocked ? _snapBlockedFraction : _snapCommitFraction;
       _snapVisualOffsetCells = (_snapDragX / cellSize).clamp(-limit, limit);
     });
+
+    if (moved) {
+      unawaited(_playMusic());
+    }
   }
 
   void _handlePointerUp(PointerUpEvent event) {
@@ -273,8 +288,6 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       } else {
         _runAction(_game.hardDrop);
       }
-    } else if (_snapVisualOffsetCells.abs() >= _snapCommitFraction) {
-      _commitHorizontalSnap();
     } else {
       _animateSnapBack();
     }
@@ -283,23 +296,12 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _snapDragX = 0;
   }
 
-  void _commitHorizontalSnap() {
-    final direction = _snapVisualOffsetCells.sign.toInt();
-    if (!_canMoveHorizontally(direction)) {
-      _animateSnapBack();
-      return;
+  void _moveHorizontally(int direction) {
+    if (direction < 0) {
+      _game.moveLeft();
+    } else {
+      _game.moveRight();
     }
-
-    setState(() {
-      if (direction < 0) {
-        _game.moveLeft();
-      } else {
-        _game.moveRight();
-      }
-      _snapVisualOffsetCells -= direction;
-    });
-    unawaited(_playMusic());
-    _animateSnapBack();
   }
 
   bool _canMoveHorizontally(int direction) {
