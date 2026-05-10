@@ -8,7 +8,7 @@
 PRODUCT_NAME = tetris
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.szabi.tetris
+PRODUCT_BUNDLE_IDENTIFIER = one.tear.tetris
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 com.szabi. All rights reserved.
