@@ -23,9 +23,9 @@ const _snapBackDuration = Duration(milliseconds: 120);
 const _snapCommitDuration = Duration(milliseconds: 64);
 const _lineClearAnimationDuration = Duration(milliseconds: 240);
 const _lineClearDropDelay = Duration(milliseconds: 24);
-const _boardImpactDuration = Duration(milliseconds: 260);
-const _boardImpactDownCells = 0.18;
-const _boardImpactSideCells = 0.09;
+const _boardImpactDuration = Duration(milliseconds: 380);
+const _boardImpactDownCells = 0.34;
+const _boardSideImpactCells = 0.2;
 const _horizontalIntentFraction = 0.35;
 const _minHorizontalIntentDistance = 20.0;
 const _snapPreviewFraction = 0.25;
@@ -797,17 +797,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   }
 
   Offset _hardDropImpactOffset() {
-    final cells = _game.ghostCells.toList(growable: false);
-    if (cells.isEmpty) {
-      return const Offset(0, _boardImpactDownCells);
-    }
-
-    final centerX =
-        cells.fold<double>(0, (sum, cell) => sum + cell.x + 0.5) / cells.length;
-    final sideBias = ((centerX - TetrisGame.width / 2) / (TetrisGame.width / 2))
-        .clamp(-1.0, 1.0)
-        .toDouble();
-    return Offset(sideBias * _boardImpactSideCells, _boardImpactDownCells);
+    return const Offset(0, _boardImpactDownCells);
   }
 
   void _startBoardImpact(Offset impactOffset) {
@@ -880,6 +870,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
 
     var committedColumns = 0;
     var pulseDirection = 0;
+    var wallImpactDirection = 0;
     setState(() {
       while (_snapDragX.abs() >= snapDistance) {
         final direction = _snapDragX.sign.toInt();
@@ -897,6 +888,9 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       if (blocked) {
         _snapPreviewOffsetCells = _snapBlockedFraction * direction;
         _snapDragX = 0;
+        if (_canTriggerWallImpact(direction)) {
+          wallImpactDirection = direction;
+        }
       } else {
         _snapPreviewOffsetCells = _snapPreviewOffsetForDrag(
           _snapDragX,
@@ -915,6 +909,9 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       _playSfx(TetrisSfx.slide);
       _playHaptic(TetrisHaptic.move);
       _animateSnapPulseToZero(_snapCommitDuration);
+    }
+    if (wallImpactDirection != 0) {
+      _startBoardImpact(Offset(wallImpactDirection * _boardSideImpactCells, 0));
     }
   }
 
@@ -990,6 +987,20 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       }
     }
     return true;
+  }
+
+  bool _canTriggerWallImpact(int direction) {
+    if (direction == 0 || _game.hardDropDistance <= 0) {
+      return false;
+    }
+
+    for (final cell in _game.activeCells) {
+      final targetX = cell.x + direction;
+      if (targetX < 0 || targetX >= TetrisGame.width) {
+        return true;
+      }
+    }
+    return false;
   }
 
   void _animateSnapBack() {

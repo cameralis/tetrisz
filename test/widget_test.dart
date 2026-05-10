@@ -808,9 +808,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('hard drop impact springs the board down and right', (
-    tester,
-  ) async {
+  testWidgets('hard drop impact springs the board down only', (tester) async {
     _usePhoneViewport(tester);
     final game = _visiblePieceGame(Tetromino.t);
     while (game.moveRight()) {}
@@ -823,18 +821,16 @@ void main() {
     await tester.pump();
 
     final impact = _boardImpactOffset(tester);
-    expect(impact.dx, greaterThan(0));
-    expect(impact.dy, greaterThan(0));
+    expect(impact.dx, 0);
+    expect(impact.dy, greaterThan(0.3));
 
-    await tester.pump(const Duration(milliseconds: 320));
+    await tester.pump(const Duration(milliseconds: 420));
 
     expect(_boardImpactOffset(tester), Offset.zero);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('hard drop impact leans left when the piece lands left', (
-    tester,
-  ) async {
+  testWidgets('left wall pull springs the board left', (tester) async {
     _usePhoneViewport(tester);
     final game = _visiblePieceGame(Tetromino.t);
     while (game.moveLeft()) {}
@@ -843,12 +839,36 @@ void main() {
     await tester.pump();
 
     final board = find.byKey(const ValueKey('tetris-board'));
-    await tester.drag(board, const Offset(0, 96));
+    final gesture = await tester.startGesture(tester.getCenter(board));
+    await gesture.moveBy(-_committingSnapDrag);
     await tester.pump();
 
     final impact = _boardImpactOffset(tester);
     expect(impact.dx, lessThan(0));
-    expect(impact.dy, greaterThan(0));
+    expect(impact.dy, 0);
+    await gesture.up();
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('right wall pull springs the board right', (tester) async {
+    _usePhoneViewport(tester);
+    final game = _visiblePieceGame(Tetromino.t);
+    while (game.moveRight()) {}
+
+    await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
+    await tester.pump();
+
+    final board = find.byKey(const ValueKey('tetris-board'));
+    final gesture = await tester.startGesture(tester.getCenter(board));
+    await gesture.moveBy(_committingSnapDrag);
+    await tester.pump();
+
+    final impact = _boardImpactOffset(tester);
+    expect(impact.dx, greaterThan(0));
+    expect(impact.dy, 0);
+    await gesture.up();
+    await tester.pump();
     expect(tester.takeException(), isNull);
   });
 
