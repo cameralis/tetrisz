@@ -50,6 +50,8 @@ const _defaultSfxVolume = 2.0;
 const _maxSfxVolume = 2.0;
 const _musicVolumePreferenceKey = 'tetris.musicVolume';
 const _sfxVolumePreferenceKey = 'tetris.sfxVolume';
+@visibleForTesting
+const tetrisHighScorePreferenceKey = 'tetris.highScore';
 const _movementSfxStartGap = Duration(milliseconds: 55);
 const _rotationSfxStartGap = Duration(milliseconds: 35);
 const _boardAspectRatio =
@@ -350,7 +352,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   late final TetrisHaptics _haptics;
   late final bool _disposeSoundEffects;
   late final bool _disposeMusicPlayer;
-  Future<void>? _volumePreferencesFuture;
+  Future<void>? _preferencesFuture;
   TetrisMusicPlayer? _musicPlayer;
   StreamSubscription<void>? _musicCompleteSubscription;
   Timer? _softDropTimer;
@@ -375,6 +377,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   int _musicTrackIndex = 0;
   int _dragWallImpactMask = 0;
   int _lineClearAnimationSerial = 0;
+  int _highScore = 0;
   double _musicVolume = _defaultMusicVolume;
   double _sfxVolume = _defaultSfxVolume;
   LineClearAnimationSnapshot? _lineClearSnapshot;
@@ -390,7 +393,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _game = widget.game ?? TetrisGame();
-    _volumePreferencesFuture = _loadVolumePreferences();
+    _preferencesFuture = _loadPreferences();
     final soundEffects = widget.soundEffects;
     if (soundEffects != null) {
       _soundEffects = soundEffects;
@@ -587,6 +590,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
 
     final before = _SoundSnapshot.fromGame(_game);
     _game.tick(delta);
+    _recordHighScoreIfNeeded();
     final lineClearSnapshot = _lineClearSnapshotAfter(before);
     _playPostActionSfx(before);
     if (mounted) {
@@ -598,11 +602,12 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     }
   }
 
-  Future<void> _loadVolumePreferences() async {
+  Future<void> _loadPreferences() async {
     try {
       final preferences = await SharedPreferences.getInstance();
       final musicVolume = preferences.getDouble(_musicVolumePreferenceKey);
       final sfxVolume = preferences.getDouble(_sfxVolumePreferenceKey);
+      final highScore = preferences.getInt(tetrisHighScorePreferenceKey);
       if (!mounted) {
         return;
       }
@@ -614,19 +619,23 @@ class _TetrisGamePageState extends State<TetrisGamePage>
         if (sfxVolume != null) {
           _sfxVolume = sfxVolume.clamp(0.0, _maxSfxVolume).toDouble();
         }
+        _highScore = math.max(highScore ?? 0, _game.score);
         _volumePreferencesLoaded = true;
       });
+      _recordHighScoreIfNeeded();
     } catch (_) {
       if (mounted) {
         setState(() {
+          _highScore = math.max(_highScore, _game.score);
           _volumePreferencesLoaded = true;
         });
+        _recordHighScoreIfNeeded();
       }
     }
   }
 
   Future<void> _playMusicAfterVolumePreferencesLoad() async {
-    final loading = _volumePreferencesFuture;
+    final loading = _preferencesFuture;
     if (!_volumePreferencesLoaded && loading != null) {
       await loading;
     }
@@ -636,7 +645,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   }
 
   Future<void> _playMusic() async {
-    final loading = _volumePreferencesFuture;
+    final loading = _preferencesFuture;
     if (!_volumePreferencesLoaded && loading != null) {
       await loading;
       if (!mounted) {
@@ -702,6 +711,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     setState(() {
       result = action();
     });
+    _recordHighScoreIfNeeded();
 
     final lineClearSnapshot = _lineClearSnapshotAfter(before);
     final succeeded = didSucceed?.call(result, before) ?? true;
@@ -912,6 +922,22 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     try {
       final preferences = await SharedPreferences.getInstance();
       await preferences.setDouble(key, volume);
+    } catch (_) {}
+  }
+
+  void _recordHighScoreIfNeeded() {
+    if (_game.score <= _highScore) {
+      return;
+    }
+
+    _highScore = _game.score;
+    unawaited(_saveHighScorePreference(_highScore));
+  }
+
+  Future<void> _saveHighScorePreference(int highScore) async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setInt(tetrisHighScorePreferenceKey, highScore);
     } catch (_) {}
   }
 
@@ -1434,6 +1460,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
             _GameOverlay(
               gameOver: _game.gameOver,
               score: _game.score,
+              highScore: _highScore,
               musicVolume: _musicVolume,
               sfxVolume: _sfxVolume,
               onMusicVolumeChanged: _setMusicVolume,
@@ -1648,6 +1675,7 @@ class _GameOverlay extends StatelessWidget {
   const _GameOverlay({
     required this.gameOver,
     required this.score,
+    required this.highScore,
     required this.musicVolume,
     required this.sfxVolume,
     required this.onMusicVolumeChanged,
@@ -1658,6 +1686,7 @@ class _GameOverlay extends StatelessWidget {
 
   final bool gameOver;
   final int score;
+  final int highScore;
   final double musicVolume;
   final double sfxVolume;
   final ValueChanged<double> onMusicVolumeChanged;
@@ -1695,7 +1724,23 @@ class _GameOverlay extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 8),
-                _Metric(label: 'SCORE', value: score.toString()),
+                SizedBox(
+                  width: 250,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: _Metric(label: 'SCORE', value: score.toString()),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: _Metric(
+                          label: 'HIGH SCORE',
+                          value: highScore.toString(),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
                 if (!gameOver) ...[
                   const SizedBox(height: 14),
                   SizedBox(

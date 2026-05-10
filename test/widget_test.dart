@@ -734,6 +734,49 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('pause menu shows and persists high score', (tester) async {
+    _usePhoneViewport(tester);
+    SharedPreferences.setMockInitialValues({tetrisHighScorePreferenceKey: 10});
+    final game = _visiblePieceGame(Tetromino.t);
+
+    await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
+    await _flushPreferenceTasks(tester);
+
+    await tester.tap(find.byTooltip('Pause'));
+    await tester.pump();
+
+    expect(find.text('HIGH SCORE'), findsOneWidget);
+    expect(find.text('10'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Resume').last);
+    await tester.pump();
+
+    await tester.drag(
+      find.byKey(const ValueKey('tetris-board')),
+      const Offset(0, 96),
+    );
+    await tester.pump();
+
+    expect(game.score, greaterThan(10));
+
+    await tester.tap(find.byTooltip('Pause'));
+    await tester.pump();
+    expect(find.text(game.score.toString()), findsWidgets);
+
+    await _flushPreferenceTasks(tester);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+
+    await tester.pumpWidget(const TetrisApp(enableAudio: false));
+    await _flushPreferenceTasks(tester);
+    await tester.tap(find.byTooltip('Pause'));
+    await tester.pump();
+
+    expect(find.text('HIGH SCORE'), findsOneWidget);
+    expect(find.text(game.score.toString()), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('music playlist advances in order and wraps to the first track', (
     tester,
   ) async {
