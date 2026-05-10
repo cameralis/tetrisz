@@ -41,6 +41,7 @@ const tetrisLineClearSnapParticleHdrBoost = 4.25;
 const tetrisLineClearSnapParticleGlowBoost = 0.55;
 const _horizontalIntentFraction = 0.35;
 const _minHorizontalIntentDistance = 20.0;
+const _minGestureCellSize = 36.0;
 const _snapPreviewFraction = 0.25;
 const _snapCommitFraction = 0.7;
 const _snapBlockedFraction = 0.22;
@@ -1283,7 +1284,8 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final compact = constraints.maxWidth < 760;
+            final compact =
+                constraints.maxWidth < 760 || constraints.maxHeight < 500;
 
             if (compact) {
               return _buildCompactLayout(constraints);
@@ -1304,10 +1306,11 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     );
     final resolvedBoardHeight = boardWidth / _boardAspectRatio;
     final cellSize = _cellSizeFor(boardWidth, resolvedBoardHeight);
+    final gestureCellSize = _gestureCellSizeFor(cellSize);
 
     return SizedBox.expand(
       child: _buildGestureSurface(
-        cellSize: cellSize,
+        cellSize: gestureCellSize,
         child: Center(
           child: _buildBoardCanvas(boardWidth, resolvedBoardHeight),
         ),
@@ -1325,6 +1328,8 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       availableBoardHeight * _boardAspectRatio,
     );
     final boardHeight = boardWidth / _boardAspectRatio;
+    final cellSize = _cellSizeFor(boardWidth, boardHeight);
+    final gestureCellSize = _gestureCellSizeFor(cellSize);
 
     return SizedBox.expand(
       child: Column(
@@ -1342,16 +1347,14 @@ class _TetrisGamePageState extends State<TetrisGamePage>
               onPause: _togglePause,
             ),
           ),
-          Expanded(child: Center(child: _buildBoard(boardWidth, boardHeight))),
+          Expanded(
+            child: _buildGestureSurface(
+              cellSize: gestureCellSize,
+              child: Center(child: _buildBoardCanvas(boardWidth, boardHeight)),
+            ),
+          ),
         ],
       ),
-    );
-  }
-
-  Widget _buildBoard(double width, double height) {
-    return _buildGestureSurface(
-      cellSize: _cellSizeFor(width, height),
-      child: _buildBoardCanvas(width, height),
     );
   }
 
@@ -1360,6 +1363,10 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       width / TetrisGame.width,
       height / (TetrisGame.visibleRows + _bufferSliverRows),
     );
+  }
+
+  double _gestureCellSizeFor(double boardCellSize) {
+    return math.max(boardCellSize, _minGestureCellSize);
   }
 
   Widget _buildGestureSurface({

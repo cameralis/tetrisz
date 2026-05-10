@@ -429,28 +429,33 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('landscape renders board only without controls', (tester) async {
+  testWidgets('landscape renders status bar without gameplay controls', (
+    tester,
+  ) async {
     _useLandscapeViewport(tester);
 
     await tester.pumpWidget(const TetrisApp(enableAudio: false));
     await tester.pump();
 
     final board = find.byKey(const ValueKey('tetris-board'));
+    final topBar = find.byKey(const ValueKey('compact-top-bar'));
     final boardRect = tester.getRect(board);
+    final topBarRect = tester.getRect(topBar);
 
-    expect(find.byKey(const ValueKey('compact-top-bar')), findsNothing);
+    expect(topBar, findsOneWidget);
     expect(find.text('TETRIS'), findsNothing);
-    expect(find.text('HOLD'), findsNothing);
-    expect(find.text('NEXT'), findsNothing);
-    expect(find.text('SCORE'), findsNothing);
-    expect(find.text('LINES'), findsNothing);
-    expect(find.byTooltip('Pause'), findsNothing);
+    expect(find.text('HOLD'), findsOneWidget);
+    expect(find.text('NEXT'), findsOneWidget);
+    expect(find.text('SCORE'), findsWidgets);
+    expect(find.text('LINES'), findsWidgets);
+    expect(find.byTooltip('Pause'), findsOneWidget);
     expect(find.byTooltip('Rotate clockwise'), findsNothing);
     expect(find.byTooltip('Rotate counter-clockwise'), findsNothing);
     expect(find.byTooltip('Hard drop'), findsNothing);
     expect(find.byTooltip('Hold'), findsNothing);
     expect(find.byTooltip('Restart'), findsNothing);
     expect(boardRect.top, greaterThanOrEqualTo(0));
+    expect(topBarRect.bottom, lessThanOrEqualTo(boardRect.top));
     expect(boardRect.left, greaterThanOrEqualTo(0));
     expect(boardRect.right, lessThanOrEqualTo(_landscapeViewport.width));
     expect(boardRect.bottom, lessThanOrEqualTo(_landscapeViewport.height));
@@ -472,10 +477,18 @@ void main() {
 
     expect(dragStart.dx, lessThan(boardRect.left));
 
-    final gesture = await tester.startGesture(dragStart);
-    await gesture.moveBy(const Offset(24, 0));
+    final partialGesture = await tester.startGesture(dragStart);
+    await partialGesture.moveBy(_partialSnapDrag);
     await tester.pump();
-    await gesture.up();
+    await partialGesture.up();
+    await tester.pump();
+
+    expect(game.active!.x, startX);
+
+    final commitGesture = await tester.startGesture(dragStart);
+    await commitGesture.moveBy(_committingSnapDrag);
+    await tester.pump();
+    await commitGesture.up();
     await tester.pump();
 
     expect(game.active!.x, greaterThan(startX));
