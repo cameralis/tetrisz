@@ -32,6 +32,9 @@ const _lineClearSnapTextureCellSize = 32.0;
 const _lineClearSnapParticleLifetime = 0.72;
 const _lineClearSnapFadeDuration = 0.42;
 const _lineClearSnapParticleSpeed = 0.26;
+const _lineClearSnapParticlesInRow = TetrisGame.width * 5;
+const _lineClearSnapParticlesInColumn = TetrisGame.visibleRows * 5;
+const _lineClearSnapWarmUpSize = Size(320, 640);
 const _horizontalIntentFraction = 0.35;
 const _minHorizontalIntentDistance = 20.0;
 const _snapPreviewFraction = 0.25;
@@ -329,8 +332,9 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   double _musicVolume = _defaultMusicVolume;
   double _sfxVolume = _defaultSfxVolume;
   LineClearAnimationSnapshot? _lineClearSnapshot;
-  ui.FragmentProgram? _lineClearSnapProgram;
+  ui.FragmentShader? _lineClearSnapShader;
   ui.Image? _lineClearSnapImage;
+  bool _lineClearSnapWarmUpComplete = false;
 
   bool get _boardAcceptsInput =>
       !_game.paused && !_game.gameOver && !_lineClearAnimating;
@@ -419,16 +423,98 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       final program = await ui.FragmentProgram.fromAsset(
         _lineClearSnapShaderAsset,
       );
+      final shader = program.fragmentShader();
       if (!mounted) {
         return;
       }
       setState(() {
-        _lineClearSnapProgram = program;
+        _lineClearSnapShader = shader;
+      });
+      await _warmUpLineClearSnapShader(shader);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _lineClearSnapWarmUpComplete = true;
       });
     } catch (_) {
       // Tests and unsupported renderers can run without the shader; the board
       // still holds the pre-clear snapshot until the animation completes.
     }
+  }
+
+  Future<void> _warmUpLineClearSnapShader(ui.FragmentShader shader) async {
+    await SchedulerBinding.instance.endOfFrame;
+    if (!mounted) {
+      return;
+    }
+
+    final image = await _renderLineClearSnapWarmUpImage();
+    try {
+      await _renderLineClearSnapShaderFrame(
+        shader: shader,
+        image: image,
+        size: _lineClearSnapWarmUpSize,
+        progress: 0.18,
+      );
+      await _renderLineClearSnapShaderFrame(
+        shader: shader,
+        image: image,
+        size: _lineClearSnapWarmUpSize,
+        progress: 0.72,
+      );
+    } finally {
+      image.dispose();
+    }
+  }
+
+  Future<ui.Image> _renderLineClearSnapWarmUpImage() async {
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder, Offset.zero & _lineClearSnapWarmUpSize);
+    const cellSize = _lineClearSnapTextureCellSize;
+    final bottom = TetrisGame.visibleRows - 1;
+    for (var x = 0; x < TetrisGame.width; x += 1) {
+      _drawMino(
+        canvas,
+        Offset.zero,
+        cellSize,
+        x,
+        bottom,
+        Tetromino.values[x % Tetromino.values.length],
+      );
+    }
+
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(
+      _lineClearSnapWarmUpSize.width.ceil(),
+      _lineClearSnapWarmUpSize.height.ceil(),
+    );
+    picture.dispose();
+    return image;
+  }
+
+  Future<void> _renderLineClearSnapShaderFrame({
+    required ui.FragmentShader shader,
+    required ui.Image image,
+    required Size size,
+    required double progress,
+  }) async {
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder, Offset.zero & size);
+    _configureLineClearSnapShader(
+      shader: shader,
+      progress: progress,
+      image: image,
+      size: size,
+    );
+    canvas.drawRect(Offset.zero & size, Paint()..shader = shader);
+    final picture = recorder.endRecording();
+    final rendered = await picture.toImage(
+      size.width.ceil(),
+      size.height.ceil(),
+    );
+    rendered.dispose();
+    picture.dispose();
   }
 
   @override
@@ -1317,7 +1403,9 @@ class _TetrisGamePageState extends State<TetrisGamePage>
                         boardImpactOffset: _boardImpactOffsetCells,
                         lineClearSnapshot: _lineClearSnapshot,
                         lineClearProgress: _lineClearController.value,
-                        lineClearSnapProgram: _lineClearSnapProgram,
+                        lineClearSnapShader: _lineClearSnapWarmUpComplete
+                            ? _lineClearSnapShader
+                            : null,
                         lineClearSnapImage: _lineClearSnapImage,
                       ),
                       size: Size.infinite,
@@ -2056,7 +2144,7 @@ class _BoardPainter extends CustomPainter {
     required this.boardImpactOffset,
     required this.lineClearSnapshot,
     required this.lineClearProgress,
-    required this.lineClearSnapProgram,
+    required this.lineClearSnapShader,
     required this.lineClearSnapImage,
   });
 
@@ -2065,7 +2153,7 @@ class _BoardPainter extends CustomPainter {
   final Offset boardImpactOffset;
   final LineClearAnimationSnapshot? lineClearSnapshot;
   final double lineClearProgress;
-  final ui.FragmentProgram? lineClearSnapProgram;
+  final ui.FragmentShader? lineClearSnapShader;
   final ui.Image? lineClearSnapImage;
 
   @override
@@ -2245,8 +2333,8 @@ class _BoardPainter extends CustomPainter {
     }
 
     final shaderImage = lineClearSnapImage;
-    final shaderProgram = lineClearSnapProgram;
-    if (shaderImage == null || shaderProgram == null) {
+    final shader = lineClearSnapShader;
+    if (shaderImage == null || shader == null) {
       for (final row in snapshot.rows) {
         final visibleY = row - TetrisGame.bufferRows;
         if (visibleY < 0 || visibleY >= TetrisGame.visibleRows) {
@@ -2262,20 +2350,15 @@ class _BoardPainter extends CustomPainter {
       return;
     }
 
-    final shader = shaderProgram.fragmentShader();
-    shader.setFloat(0, lineClearProgress.clamp(0.0, 1.0).toDouble());
-    shader.setFloat(1, _lineClearSnapParticleLifetime);
-    shader.setFloat(2, _lineClearSnapFadeDuration);
-    shader.setFloat(3, (TetrisGame.width * 5).toDouble());
-    shader.setFloat(4, (TetrisGame.visibleRows * 5).toDouble());
-    shader.setFloat(5, _lineClearSnapParticleSpeed);
-    shader.setFloat(6, cellSize * TetrisGame.width);
-    shader.setFloat(7, cellSize * TetrisGame.visibleRows);
-    shader.setImageSampler(0, shaderImage);
-
     final visibleSize = Size(
       cellSize * TetrisGame.width,
       cellSize * TetrisGame.visibleRows,
+    );
+    _configureLineClearSnapShader(
+      shader: shader,
+      progress: lineClearProgress,
+      image: shaderImage,
+      size: visibleSize,
     );
     canvas.save();
     canvas.translate(visibleOrigin.dx, visibleOrigin.dy);
@@ -2285,6 +2368,23 @@ class _BoardPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _BoardPainter oldDelegate) => true;
+}
+
+void _configureLineClearSnapShader({
+  required ui.FragmentShader shader,
+  required double progress,
+  required ui.Image image,
+  required Size size,
+}) {
+  shader.setFloat(0, progress.clamp(0.0, 1.0).toDouble());
+  shader.setFloat(1, _lineClearSnapParticleLifetime);
+  shader.setFloat(2, _lineClearSnapFadeDuration);
+  shader.setFloat(3, _lineClearSnapParticlesInRow.toDouble());
+  shader.setFloat(4, _lineClearSnapParticlesInColumn.toDouble());
+  shader.setFloat(5, _lineClearSnapParticleSpeed);
+  shader.setFloat(6, size.width);
+  shader.setFloat(7, size.height);
+  shader.setImageSampler(0, image);
 }
 
 class _PiecePreviewPainter extends CustomPainter {

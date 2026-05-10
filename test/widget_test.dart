@@ -105,6 +105,19 @@ Object? _boardLineClearSnapImage(WidgetTester tester) {
   return (boardPaint.painter as dynamic).lineClearSnapImage as Object?;
 }
 
+Object? _boardLineClearSnapShader(WidgetTester tester) {
+  final boardPaints = tester.widgetList<CustomPaint>(
+    find.descendant(
+      of: find.byKey(const ValueKey('tetris-board')),
+      matching: find.byType(CustomPaint),
+    ),
+  );
+  final boardPaint = boardPaints.singleWhere(
+    (paint) => paint.painter.runtimeType.toString() == '_BoardPainter',
+  );
+  return (boardPaint.painter as dynamic).lineClearSnapShader as Object?;
+}
+
 LineClearAnimationSnapshot? _boardLineClearSnapshot(WidgetTester tester) {
   final boardPaints = tester.widgetList<CustomPaint>(
     find.descendant(
@@ -731,6 +744,23 @@ void main() {
       containsAll([TetrisSfx.hardDrop, TetrisSfx.tetris, TetrisSfx.levelUp]),
     );
     expect(soundEffects.playedSfx, isNot(contains(TetrisSfx.clear)));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('prewarms the line clear snap shader before first clear', (
+    tester,
+  ) async {
+    _usePhoneViewport(tester);
+
+    await tester.pumpWidget(const TetrisApp(enableAudio: false));
+    await tester.pump();
+
+    for (var i = 0; i < 12 && _boardLineClearSnapShader(tester) == null; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.idle();
+    }
+
+    expect(_boardLineClearSnapShader(tester), isNotNull);
     expect(tester.takeException(), isNull);
   });
 
