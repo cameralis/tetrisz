@@ -294,24 +294,33 @@ void main() {
     }
   });
 
-  test('ghost landing outline uses saturated extended HDR colors', () {
+  test('ghost landing outline uses mixed extended HDR colors', () {
     for (final type in Tetromino.values) {
       final outline = tetrisGhostHdrOutlineColorFor(type);
       final channels = [outline.r, outline.g, outline.b]..sort();
 
       expect(outline.colorSpace, ui.ColorSpace.extendedSRGB, reason: '$type');
-      expect(channels.last, greaterThan(4), reason: '$type');
-      expect(channels.first, lessThan(0.8), reason: '$type');
-      expect(channels.last - channels.first, greaterThan(3.4), reason: '$type');
+      expect(channels.last, greaterThan(3), reason: '$type');
+      expect(channels.first, greaterThan(0.2), reason: '$type');
+      expect(channels.first, lessThan(1), reason: '$type');
+      expect(channels.last - channels.first, greaterThan(2), reason: '$type');
     }
   });
 
-  test('ghost green is bright without being pure radioactive green', () {
+  test('ghost green is bright without being pure primary green', () {
     final outline = tetrisGhostHdrOutlineColorFor(Tetromino.s);
 
-    expect(outline.g, greaterThan(4.5));
-    expect(outline.r, greaterThan(0.4));
-    expect(outline.b, greaterThan(0.5));
+    expect(outline.g, greaterThan(3));
+    expect(outline.r, greaterThan(0.6));
+    expect(outline.b, greaterThan(0.8));
+  });
+
+  test('ghost red is bright without being pure primary red', () {
+    final outline = tetrisGhostHdrOutlineColorFor(Tetromino.z);
+
+    expect(outline.r, greaterThan(3));
+    expect(outline.g, greaterThan(0.45));
+    expect(outline.b, greaterThan(0.55));
   });
 
   test('iOS opts into extended dynamic range rendering', () {

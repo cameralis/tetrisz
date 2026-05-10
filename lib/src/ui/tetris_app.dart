@@ -1981,19 +1981,20 @@ class _BoardPainter extends CustomPainter {
     _drawLineClearSnapEffect(canvas, visibleOrigin, cellSize);
 
     if (lineClearSnapshot == null) {
+      final ghostCells = <MinoCell>[];
       for (final cell in game.ghostCells) {
         final y = cell.y - TetrisGame.bufferRows;
         if (y >= 0 && y < TetrisGame.visibleRows) {
-          _drawGhost(
-            canvas,
-            visibleOrigin,
-            cellSize,
-            cell.x + activeHorizontalOffset,
-            y,
-            cell.type,
-          );
+          ghostCells.add(MinoCell(x: cell.x, y: y, type: cell.type));
         }
       }
+      _drawGhostPiece(
+        canvas,
+        visibleOrigin,
+        cellSize,
+        ghostCells,
+        activeHorizontalOffset,
+      );
     }
 
     if (lineClearSnapshot == null) {
@@ -2048,19 +2049,19 @@ class _BoardPainter extends CustomPainter {
     }
 
     if (lineClearSnapshot == null) {
+      final ghostCells = <MinoCell>[];
       for (final cell in game.ghostCells) {
-        drawSliverCell(
-          cell,
-          () => _drawGhost(
-            canvas,
-            hiddenOrigin,
-            cellSize,
-            cell.x + activeHorizontalOffset,
-            0,
-            cell.type,
-          ),
-        );
+        if (cell.y == TetrisGame.bufferRows - 1) {
+          ghostCells.add(MinoCell(x: cell.x, y: 0, type: cell.type));
+        }
       }
+      _drawGhostPiece(
+        canvas,
+        hiddenOrigin,
+        cellSize,
+        ghostCells,
+        activeHorizontalOffset,
+      );
       for (final cell in game.activeCells) {
         drawSliverCell(
           cell,
@@ -2235,59 +2236,98 @@ void _drawMino(
   );
 }
 
-void _drawGhost(
+void _drawGhostPiece(
   Canvas canvas,
   Offset origin,
   double cellSize,
-  num x,
-  num y,
-  Tetromino type,
+  List<MinoCell> cells,
+  double horizontalOffset,
 ) {
-  final rect = _cellRect(origin, cellSize, x, y).deflate(cellSize * 0.1);
-  final rrect = RRect.fromRectAndRadius(rect, Radius.circular(cellSize * 0.13));
+  if (cells.isEmpty) {
+    return;
+  }
+
+  final type = cells.first.type;
+  final path = _ghostPiecePath(origin, cellSize, cells, horizontalOffset);
   final outlineColor = tetrisGhostHdrOutlineColorFor(type);
-  canvas.drawRRect(
-    rrect,
+
+  canvas.drawPath(
+    path,
     Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = math.max(6.8, cellSize * 0.36)
+      ..strokeWidth = math.max(4.8, cellSize * 0.13)
+      ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
-      ..maskFilter = MaskFilter.blur(BlurStyle.normal, cellSize * 0.28)
-      ..color = outlineColor.withValues(alpha: 0.16),
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, cellSize * 0.32)
+      ..color = outlineColor.withValues(alpha: 0.065),
   );
-  canvas.drawRRect(
-    rrect,
+  canvas.drawPath(
+    path,
     Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = math.max(4.8, cellSize * 0.24)
+      ..strokeWidth = math.max(3.4, cellSize * 0.08)
+      ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
-      ..maskFilter = MaskFilter.blur(BlurStyle.normal, cellSize * 0.14)
-      ..color = outlineColor.withValues(alpha: 0.24),
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, cellSize * 0.18)
+      ..color = outlineColor.withValues(alpha: 0.12),
   );
-  canvas.drawRRect(
-    rrect,
+  canvas.drawPath(
+    path,
     Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = math.max(2.2, cellSize * 0.13)
+      ..strokeWidth = math.max(2.2, cellSize * 0.052)
+      ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
-      ..color = outlineColor.withValues(alpha: 0.3),
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, cellSize * 0.045)
+      ..color = outlineColor.withValues(alpha: 0.28),
   );
-  canvas.drawRRect(
-    rrect,
+  canvas.drawPath(
+    path,
     Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = math.max(1.6, cellSize * 0.085)
+      ..strokeWidth = math.max(1.8, cellSize * 0.04)
+      ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
-      ..color = outlineColor,
+      ..color = outlineColor.withValues(alpha: 0.92),
   );
-  canvas.drawRRect(
-    rrect.deflate(math.max(0.5, cellSize * 0.04)),
-    Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = math.max(0.7, cellSize * 0.028)
-      ..strokeJoin = StrokeJoin.round
-      ..color = outlineColor.withValues(alpha: 0.58),
-  );
+}
+
+Path _ghostPiecePath(
+  Offset origin,
+  double cellSize,
+  List<MinoCell> cells,
+  double horizontalOffset,
+) {
+  var path = Path();
+  var hasPath = false;
+  final inset = cellSize * 0.12;
+  final occupied = cells.map((cell) => GridPoint(cell.x, cell.y)).toSet();
+
+  for (final cell in cells) {
+    final hasLeft = occupied.contains(GridPoint(cell.x - 1, cell.y));
+    final hasRight = occupied.contains(GridPoint(cell.x + 1, cell.y));
+    final hasUp = occupied.contains(GridPoint(cell.x, cell.y - 1));
+    final hasDown = occupied.contains(GridPoint(cell.x, cell.y + 1));
+    final cellRect = _cellRect(
+      origin,
+      cellSize,
+      cell.x + horizontalOffset,
+      cell.y,
+    );
+    final rect = Rect.fromLTRB(
+      cellRect.left + (hasLeft ? 0 : inset),
+      cellRect.top + (hasUp ? 0 : inset),
+      cellRect.right - (hasRight ? 0 : inset),
+      cellRect.bottom - (hasDown ? 0 : inset),
+    );
+    final cellPath = Path()..addRect(rect);
+    path = hasPath
+        ? Path.combine(PathOperation.union, path, cellPath)
+        : cellPath;
+    hasPath = true;
+  }
+
+  return path;
 }
 
 @visibleForTesting
@@ -2295,51 +2335,51 @@ ui.Color tetrisGhostHdrOutlineColorFor(Tetromino type) {
   return switch (type) {
     Tetromino.i => const ui.Color.from(
       alpha: 1,
-      red: 0,
-      green: 1.05,
-      blue: 4.35,
+      red: 0.28,
+      green: 1.85,
+      blue: 3.85,
       colorSpace: ui.ColorSpace.extendedSRGB,
     ),
     Tetromino.j => const ui.Color.from(
       alpha: 1,
-      red: 0.08,
-      green: 0.42,
-      blue: 5.6,
+      red: 0.32,
+      green: 0.82,
+      blue: 3.75,
       colorSpace: ui.ColorSpace.extendedSRGB,
     ),
     Tetromino.l => const ui.Color.from(
       alpha: 1,
-      red: 5.45,
-      green: 1.18,
-      blue: 0,
+      red: 3.65,
+      green: 1.28,
+      blue: 0.28,
       colorSpace: ui.ColorSpace.extendedSRGB,
     ),
     Tetromino.o => const ui.Color.from(
       alpha: 1,
-      red: 4.15,
+      red: 3.2,
       green: 2.35,
-      blue: 0,
+      blue: 0.32,
       colorSpace: ui.ColorSpace.extendedSRGB,
     ),
     Tetromino.s => const ui.Color.from(
       alpha: 1,
-      red: 0.55,
-      green: 4.65,
-      blue: 0.7,
+      red: 0.68,
+      green: 3.35,
+      blue: 0.86,
       colorSpace: ui.ColorSpace.extendedSRGB,
     ),
     Tetromino.z => const ui.Color.from(
       alpha: 1,
-      red: 4.55,
-      green: 0.02,
-      blue: 0.12,
+      red: 3.45,
+      green: 0.52,
+      blue: 0.64,
       colorSpace: ui.ColorSpace.extendedSRGB,
     ),
     Tetromino.t => const ui.Color.from(
       alpha: 1,
-      red: 4.45,
-      green: 0.03,
-      blue: 5.25,
+      red: 2.75,
+      green: 0.55,
+      blue: 3.55,
       colorSpace: ui.ColorSpace.extendedSRGB,
     ),
   };
