@@ -35,28 +35,9 @@ const _lineClearSnapParticleSpeed = 0.26;
 const _lineClearSnapParticlesInRow = TetrisGame.width * 5;
 const _lineClearSnapParticlesInColumn = TetrisGame.visibleRows * 5;
 const _lineClearSnapWarmUpSize = Size(320, 640);
-@visibleForTesting
-const tetrisPreviewHdrOutlineColor = ui.Color.from(
-  alpha: 1,
-  red: 0.18,
-  green: 2.1,
-  blue: 2.8,
-  colorSpace: ui.ColorSpace.extendedSRGB,
-);
-const _previewHdrAuraColor = ui.Color.from(
-  alpha: 0.72,
-  red: 0.04,
-  green: 1.55,
-  blue: 2.4,
-  colorSpace: ui.ColorSpace.extendedSRGB,
-);
-const _previewHdrWhiteCoreColor = ui.Color.from(
-  alpha: 1,
-  red: 1.25,
-  green: 1.5,
-  blue: 1.8,
-  colorSpace: ui.ColorSpace.extendedSRGB,
-);
+const _ghostHdrAuraBoost = 2.0;
+const _ghostHdrOutlineBoost = 2.8;
+const _ghostHdrCoreBoost = 3.4;
 const _horizontalIntentFraction = 0.35;
 const _minHorizontalIntentDistance = 20.0;
 const _snapPreviewFraction = 0.25;
@@ -2433,7 +2414,7 @@ class _PiecePreviewPainter extends CustomPainter {
     );
 
     for (final point in points) {
-      _drawPreviewMino(canvas, origin, cellSize, point.x, point.y, type);
+      _drawMino(canvas, origin, cellSize, point.x, point.y, type);
     }
   }
 
@@ -2441,48 +2422,6 @@ class _PiecePreviewPainter extends CustomPainter {
   bool shouldRepaint(covariant _PiecePreviewPainter oldDelegate) {
     return oldDelegate.type != type;
   }
-}
-
-void _drawPreviewMino(
-  Canvas canvas,
-  Offset origin,
-  double cellSize,
-  num x,
-  num y,
-  Tetromino type,
-) {
-  _drawMino(canvas, origin, cellSize, x, y, type);
-
-  final rect = _cellRect(origin, cellSize, x, y).deflate(cellSize * 0.035);
-  final rrect = RRect.fromRectAndRadius(rect, Radius.circular(cellSize * 0.17));
-
-  canvas.drawRRect(
-    rrect,
-    Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = math.max(2.4, cellSize * 0.22)
-      ..strokeJoin = StrokeJoin.round
-      ..blendMode = BlendMode.plus
-      ..color = _previewHdrAuraColor,
-  );
-  canvas.drawRRect(
-    rrect,
-    Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = math.max(1.6, cellSize * 0.11)
-      ..strokeJoin = StrokeJoin.round
-      ..blendMode = BlendMode.plus
-      ..color = tetrisPreviewHdrOutlineColor,
-  );
-  canvas.drawRRect(
-    rrect.deflate(math.max(0.5, cellSize * 0.055)),
-    Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = math.max(0.8, cellSize * 0.035)
-      ..strokeJoin = StrokeJoin.round
-      ..blendMode = BlendMode.plus
-      ..color = _previewHdrWhiteCoreColor,
-  );
 }
 
 Rect _cellRect(Offset origin, double cellSize, num x, num y) {
@@ -2529,13 +2468,54 @@ void _drawGhost(
   num y,
   Tetromino type,
 ) {
-  final rect = _cellRect(origin, cellSize, x, y).deflate(cellSize * 0.12);
+  final rect = _cellRect(origin, cellSize, x, y).deflate(cellSize * 0.1);
+  final rrect = RRect.fromRectAndRadius(rect, Radius.circular(cellSize * 0.13));
   canvas.drawRRect(
-    RRect.fromRectAndRadius(rect, Radius.circular(cellSize * 0.12)),
+    rrect,
     Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = math.max(1.4, cellSize * 0.07)
-      ..color = _colorFor(type).withValues(alpha: 0.45),
+      ..strokeWidth = math.max(2.2, cellSize * 0.13)
+      ..strokeJoin = StrokeJoin.round
+      ..blendMode = BlendMode.plus
+      ..color = _ghostHdrColorFor(type, alpha: 0.58, boost: _ghostHdrAuraBoost),
+  );
+  canvas.drawRRect(
+    rrect,
+    Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = math.max(1.6, cellSize * 0.085)
+      ..strokeJoin = StrokeJoin.round
+      ..blendMode = BlendMode.plus
+      ..color = tetrisGhostHdrOutlineColorFor(type),
+  );
+  canvas.drawRRect(
+    rrect.deflate(math.max(0.5, cellSize * 0.045)),
+    Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = math.max(0.8, cellSize * 0.035)
+      ..strokeJoin = StrokeJoin.round
+      ..blendMode = BlendMode.plus
+      ..color = _ghostHdrColorFor(type, alpha: 0.9, boost: _ghostHdrCoreBoost),
+  );
+}
+
+@visibleForTesting
+ui.Color tetrisGhostHdrOutlineColorFor(Tetromino type) {
+  return _ghostHdrColorFor(type, alpha: 1, boost: _ghostHdrOutlineBoost);
+}
+
+ui.Color _ghostHdrColorFor(
+  Tetromino type, {
+  required double alpha,
+  required double boost,
+}) {
+  final color = _colorFor(type);
+  return ui.Color.from(
+    alpha: alpha,
+    red: color.r * boost,
+    green: color.g * boost,
+    blue: color.b * boost,
+    colorSpace: ui.ColorSpace.extendedSRGB,
   );
 }
 

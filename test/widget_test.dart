@@ -286,10 +286,11 @@ void main() {
     }
   });
 
-  test('preview outline uses extended HDR color values', () {
-    expect(tetrisPreviewHdrOutlineColor.colorSpace, ui.ColorSpace.extendedSRGB);
-    expect(tetrisPreviewHdrOutlineColor.g, greaterThan(1));
-    expect(tetrisPreviewHdrOutlineColor.b, greaterThan(1));
+  test('ghost landing outline uses extended HDR color values', () {
+    final outline = tetrisGhostHdrOutlineColorFor(Tetromino.i);
+    expect(outline.colorSpace, ui.ColorSpace.extendedSRGB);
+    expect(outline.g, greaterThan(1));
+    expect(outline.b, greaterThan(1));
   });
 
   test('platform app and splash icons use the provided icon', () async {
