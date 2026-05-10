@@ -35,8 +35,6 @@ const _lineClearSnapParticleSpeed = 0.26;
 const _lineClearSnapParticlesInRow = TetrisGame.width * 5;
 const _lineClearSnapParticlesInColumn = TetrisGame.visibleRows * 5;
 const _lineClearSnapWarmUpSize = Size(320, 640);
-const _ghostHdrAuraBoost = 2.0;
-const _ghostHdrOutlineBoost = 2.8;
 const _horizontalIntentFraction = 0.35;
 const _minHorizontalIntentDistance = 20.0;
 const _snapPreviewFraction = 0.25;
@@ -2469,14 +2467,14 @@ void _drawGhost(
 ) {
   final rect = _cellRect(origin, cellSize, x, y).deflate(cellSize * 0.1);
   final rrect = RRect.fromRectAndRadius(rect, Radius.circular(cellSize * 0.13));
+  final outlineColor = tetrisGhostHdrOutlineColorFor(type);
   canvas.drawRRect(
     rrect,
     Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = math.max(2.2, cellSize * 0.13)
       ..strokeJoin = StrokeJoin.round
-      ..blendMode = BlendMode.plus
-      ..color = _ghostHdrColorFor(type, alpha: 0.58, boost: _ghostHdrAuraBoost),
+      ..color = outlineColor.withValues(alpha: 0.3),
   );
   canvas.drawRRect(
     rrect,
@@ -2484,8 +2482,7 @@ void _drawGhost(
       ..style = PaintingStyle.stroke
       ..strokeWidth = math.max(1.6, cellSize * 0.085)
       ..strokeJoin = StrokeJoin.round
-      ..blendMode = BlendMode.plus
-      ..color = tetrisGhostHdrOutlineColorFor(type),
+      ..color = outlineColor,
   );
   canvas.drawRRect(
     rrect.deflate(math.max(0.5, cellSize * 0.04)),
@@ -2493,33 +2490,63 @@ void _drawGhost(
       ..style = PaintingStyle.stroke
       ..strokeWidth = math.max(0.7, cellSize * 0.028)
       ..strokeJoin = StrokeJoin.round
-      ..blendMode = BlendMode.plus
-      ..color = _ghostHdrColorFor(
-        type,
-        alpha: 0.36,
-        boost: _ghostHdrOutlineBoost,
-      ),
+      ..color = outlineColor.withValues(alpha: 0.58),
   );
 }
 
 @visibleForTesting
 ui.Color tetrisGhostHdrOutlineColorFor(Tetromino type) {
-  return _ghostHdrColorFor(type, alpha: 1, boost: _ghostHdrOutlineBoost);
-}
-
-ui.Color _ghostHdrColorFor(
-  Tetromino type, {
-  required double alpha,
-  required double boost,
-}) {
-  final color = _colorFor(type);
-  return ui.Color.from(
-    alpha: alpha,
-    red: color.r * boost,
-    green: color.g * boost,
-    blue: color.b * boost,
-    colorSpace: ui.ColorSpace.extendedSRGB,
-  );
+  return switch (type) {
+    Tetromino.i => const ui.Color.from(
+      alpha: 1,
+      red: 0,
+      green: 0.9,
+      blue: 3.2,
+      colorSpace: ui.ColorSpace.extendedSRGB,
+    ),
+    Tetromino.j => const ui.Color.from(
+      alpha: 1,
+      red: 0.05,
+      green: 0.16,
+      blue: 3.4,
+      colorSpace: ui.ColorSpace.extendedSRGB,
+    ),
+    Tetromino.l => const ui.Color.from(
+      alpha: 1,
+      red: 3.2,
+      green: 0.58,
+      blue: 0,
+      colorSpace: ui.ColorSpace.extendedSRGB,
+    ),
+    Tetromino.o => const ui.Color.from(
+      alpha: 1,
+      red: 3.0,
+      green: 1.85,
+      blue: 0,
+      colorSpace: ui.ColorSpace.extendedSRGB,
+    ),
+    Tetromino.s => const ui.Color.from(
+      alpha: 1,
+      red: 0,
+      green: 3.1,
+      blue: 0.08,
+      colorSpace: ui.ColorSpace.extendedSRGB,
+    ),
+    Tetromino.z => const ui.Color.from(
+      alpha: 1,
+      red: 3.3,
+      green: 0.02,
+      blue: 0.12,
+      colorSpace: ui.ColorSpace.extendedSRGB,
+    ),
+    Tetromino.t => const ui.Color.from(
+      alpha: 1,
+      red: 2.25,
+      green: 0,
+      blue: 3.2,
+      colorSpace: ui.ColorSpace.extendedSRGB,
+    ),
+  };
 }
 
 Color _colorFor(Tetromino type) {

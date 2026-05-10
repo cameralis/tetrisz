@@ -286,11 +286,27 @@ void main() {
     }
   });
 
-  test('ghost landing outline uses extended HDR color values', () {
-    final outline = tetrisGhostHdrOutlineColorFor(Tetromino.i);
-    expect(outline.colorSpace, ui.ColorSpace.extendedSRGB);
-    expect(outline.g, greaterThan(1));
-    expect(outline.b, greaterThan(1));
+  test('ghost landing outline uses saturated extended HDR colors', () {
+    for (final type in Tetromino.values) {
+      final outline = tetrisGhostHdrOutlineColorFor(type);
+      final channels = [outline.r, outline.g, outline.b]..sort();
+
+      expect(outline.colorSpace, ui.ColorSpace.extendedSRGB, reason: '$type');
+      expect(channels.last, greaterThan(1.5), reason: '$type');
+      expect(channels.first, lessThan(0.2), reason: '$type');
+      expect(channels.last - channels.first, greaterThan(1.4), reason: '$type');
+    }
+  });
+
+  test('iOS opts into extended dynamic range rendering', () {
+    final plist = File('ios/Runner/Info.plist').readAsStringSync();
+    final sceneDelegate = File(
+      'ios/Runner/SceneDelegate.swift',
+    ).readAsStringSync();
+
+    expect(plist, contains('<key>FLTEnableWideGamut</key>'));
+    expect(sceneDelegate, contains('preferredDynamicRange = .high'));
+    expect(sceneDelegate, contains('contentsHeadroom = max'));
   });
 
   test('platform app and splash icons use the provided icon', () async {
