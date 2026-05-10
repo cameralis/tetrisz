@@ -1,30 +1,31 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:tetris/main.dart';
+import 'package:tetris/src/ui/tetris_app.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
-
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
-
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
+  testWidgets('renders the playable Tetris surface', (tester) async {
+    await tester.pumpWidget(const TetrisApp(enableAudio: false));
     await tester.pump();
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    expect(find.text('TETRIS'), findsOneWidget);
+    expect(find.text('HOLD'), findsOneWidget);
+    expect(find.text('NEXT'), findsOneWidget);
+    expect(find.text('SCORE'), findsWidgets);
+    expect(find.byType(CustomPaint), findsWidgets);
+    expect(find.byTooltip('Restart'), findsOneWidget);
+  });
+
+  testWidgets('renders without overflow on a phone viewport', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(const TetrisApp(enableAudio: false));
+    await tester.pump();
+
+    expect(find.text('HOLD'), findsOneWidget);
+    expect(find.text('NEXT'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 }
