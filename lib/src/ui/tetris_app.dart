@@ -232,25 +232,27 @@ class _TetrisGamePageState extends State<TetrisGamePage>
         child: LayoutBuilder(
           builder: (context, constraints) {
             final compact = constraints.maxWidth < 760;
-            return Padding(
-              padding: const EdgeInsets.all(12),
-              child: Stack(
-                children: [
-                  compact
-                      ? _buildCompactLayout(constraints)
-                      : _buildWideLayout(constraints),
-                  Positioned(
-                    top: 0,
-                    right: 0,
-                    child: _TopControls(
-                      paused: _game.paused,
-                      musicEnabled: _musicEnabled,
-                      onPause: _togglePause,
-                      onMusic: _toggleMusic,
-                    ),
+            final game = compact
+                ? _buildCompactLayout(constraints)
+                : Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: _buildWideLayout(constraints),
+                  );
+
+            return Stack(
+              children: [
+                game,
+                Positioned(
+                  top: compact ? 8 : 12,
+                  right: compact ? 8 : 12,
+                  child: _TopControls(
+                    paused: _game.paused,
+                    musicEnabled: _musicEnabled,
+                    onPause: _togglePause,
+                    onMusic: _toggleMusic,
                   ),
-                ],
-              ),
+                ),
+              ],
             );
           },
         ),
@@ -281,20 +283,22 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   }
 
   Widget _buildCompactLayout(BoxConstraints constraints) {
-    final boardWidthFromHeight = math.max(
-      180.0,
-      (constraints.maxHeight - 330) * _boardAspectRatio,
+    final boardWidth = math.min(
+      constraints.maxWidth,
+      constraints.maxHeight * _boardAspectRatio,
     );
-    final boardWidth = math.min(constraints.maxWidth - 8, boardWidthFromHeight);
     final boardHeight = boardWidth / _boardAspectRatio;
 
-    return Center(
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: boardWidth),
+    return SizedBox.expand(
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          _buildBoard(boardWidth, boardHeight),
+          Positioned(
+            top: 8,
+            left: 8,
+            right: 136,
+            child: IgnorePointer(
               child: _CompactHud(
                 holdPiece: _game.holdPiece,
                 nextQueue: _game.nextQueue.take(2).toList(),
@@ -303,10 +307,8 @@ class _TetrisGamePageState extends State<TetrisGamePage>
                 lines: _game.lines,
               ),
             ),
-            const SizedBox(height: 8),
-            _buildBoard(boardWidth, boardHeight),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -348,6 +350,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
 
   Widget _buildBoard(double width, double height) {
     return SizedBox(
+      key: const ValueKey('tetris-board'),
       width: width,
       height: height,
       child: LayoutBuilder(

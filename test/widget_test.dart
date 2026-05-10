@@ -24,6 +24,9 @@ void main() {
     await tester.pumpWidget(const TetrisApp(enableAudio: false));
     await tester.pump();
 
+    final board = find.byKey(const ValueKey('tetris-board'));
+    final boardRect = tester.getRect(board);
+
     expect(find.text('HOLD'), findsOneWidget);
     expect(find.text('NEXT'), findsOneWidget);
     expect(find.byTooltip('Pause'), findsOneWidget);
@@ -32,6 +35,16 @@ void main() {
     expect(find.byTooltip('Rotate counter-clockwise'), findsNothing);
     expect(find.byTooltip('Hard drop'), findsNothing);
     expect(find.byTooltip('Hold'), findsNothing);
+    expect(find.byType(SingleChildScrollView), findsNothing);
+    expect(boardRect.left, 0);
+    expect(boardRect.right, 390);
+    expect(boardRect.top, greaterThanOrEqualTo(0));
+    expect(boardRect.bottom, lessThanOrEqualTo(844));
+
+    await tester.drag(board, const Offset(0, -160));
+    await tester.pump();
+
+    expect(tester.getRect(board), boardRect);
     expect(tester.takeException(), isNull);
   });
 }
