@@ -15,6 +15,7 @@ const _mutedText = Color(0xFFA5ADBA);
 const _gridLine = Color(0x12FFFFFF);
 const _boardBack = Color(0xFF07080A);
 const _bufferSliverRows = 0.25;
+const _compactTopBarHeight = 54.0;
 const _boardAspectRatio =
     TetrisGame.width / (TetrisGame.visibleRows + _bufferSliverRows);
 
@@ -232,19 +233,20 @@ class _TetrisGamePageState extends State<TetrisGamePage>
         child: LayoutBuilder(
           builder: (context, constraints) {
             final compact = constraints.maxWidth < 760;
-            final game = compact
-                ? _buildCompactLayout(constraints)
-                : Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: _buildWideLayout(constraints),
-                  );
+
+            if (compact) {
+              return _buildCompactLayout(constraints);
+            }
 
             return Stack(
               children: [
-                game,
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: _buildWideLayout(constraints),
+                ),
                 Positioned(
-                  top: compact ? 8 : 12,
-                  right: compact ? 8 : 12,
+                  top: 12,
+                  right: 12,
                   child: _TopControls(
                     paused: _game.paused,
                     musicEnabled: _musicEnabled,
@@ -283,31 +285,35 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   }
 
   Widget _buildCompactLayout(BoxConstraints constraints) {
+    final availableBoardHeight = math.max(
+      0.0,
+      constraints.maxHeight - _compactTopBarHeight,
+    );
     final boardWidth = math.min(
       constraints.maxWidth,
-      constraints.maxHeight * _boardAspectRatio,
+      availableBoardHeight * _boardAspectRatio,
     );
     final boardHeight = boardWidth / _boardAspectRatio;
 
     return SizedBox.expand(
-      child: Stack(
-        alignment: Alignment.center,
+      child: Column(
         children: [
-          _buildBoard(boardWidth, boardHeight),
-          Positioned(
-            top: 8,
-            left: 8,
-            right: 136,
-            child: IgnorePointer(
-              child: _CompactHud(
-                holdPiece: _game.holdPiece,
-                nextQueue: _game.nextQueue.take(2).toList(),
-                score: _game.score,
-                level: _game.level,
-                lines: _game.lines,
-              ),
+          SizedBox(
+            key: const ValueKey('compact-top-bar'),
+            height: _compactTopBarHeight,
+            child: _CompactTopBar(
+              holdPiece: _game.holdPiece,
+              nextPiece: _game.nextQueue.first,
+              score: _game.score,
+              level: _game.level,
+              lines: _game.lines,
+              paused: _game.paused,
+              musicEnabled: _musicEnabled,
+              onPause: _togglePause,
+              onMusic: _toggleMusic,
             ),
           ),
+          Expanded(child: Center(child: _buildBoard(boardWidth, boardHeight))),
         ],
       ),
     );
@@ -394,14 +400,24 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   }
 }
 
-class _TopControls extends StatelessWidget {
-  const _TopControls({
+class _CompactTopBar extends StatelessWidget {
+  const _CompactTopBar({
+    required this.holdPiece,
+    required this.nextPiece,
+    required this.score,
+    required this.level,
+    required this.lines,
     required this.paused,
     required this.musicEnabled,
     required this.onPause,
     required this.onMusic,
   });
 
+  final Tetromino? holdPiece;
+  final Tetromino nextPiece;
+  final int score;
+  final int level;
+  final int lines;
   final bool paused;
   final bool musicEnabled;
   final VoidCallback onPause;
@@ -409,84 +425,49 @@ class _TopControls extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _Panel(
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _ControlButton(
-            tooltip: paused ? 'Resume' : 'Pause',
-            icon: paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
-            onPressed: onPause,
-          ),
-          const SizedBox(width: 8),
-          _ControlButton(
-            tooltip: musicEnabled ? 'Mute' : 'Music',
-            icon: musicEnabled
-                ? Icons.volume_up_rounded
-                : Icons.volume_off_rounded,
-            onPressed: onMusic,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _CompactHud extends StatelessWidget {
-  const _CompactHud({
-    required this.holdPiece,
-    required this.nextQueue,
-    required this.score,
-    required this.level,
-    required this.lines,
-  });
-
-  final Tetromino? holdPiece;
-  final List<Tetromino> nextQueue;
-  final int score;
-  final int level;
-  final int lines;
-
-  @override
-  Widget build(BuildContext context) {
-    return _Panel(
-      child: Row(
-        children: [
-          _MiniPieceSlot(title: 'HOLD', piece: holdPiece),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _Metric(label: 'SCORE', value: score.toString()),
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _Metric(label: 'LEVEL', value: level.toString()),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _Metric(label: 'LINES', value: lines.toString()),
-                    ),
-                  ],
-                ),
-              ],
+    return DecoratedBox(
+      decoration: const BoxDecoration(color: _panel),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+        child: Row(
+          children: [
+            _TopPieceSlot(title: 'HOLD', piece: holdPiece),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Row(
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: _CompactMetric(label: 'SCORE', value: score),
+                  ),
+                  Expanded(
+                    child: _CompactMetric(label: 'LEVEL', value: level),
+                  ),
+                  Expanded(
+                    child: _CompactMetric(label: 'LINES', value: lines),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(width: 10),
-          _MiniPieceSlot(
-            title: 'NEXT',
-            piece: nextQueue.isEmpty ? null : nextQueue.first,
-          ),
-        ],
+            const SizedBox(width: 8),
+            _TopPieceSlot(title: 'NEXT', piece: nextPiece),
+            const SizedBox(width: 8),
+            _TopControls(
+              paused: paused,
+              musicEnabled: musicEnabled,
+              framed: false,
+              onPause: onPause,
+              onMusic: onMusic,
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-class _MiniPieceSlot extends StatelessWidget {
-  const _MiniPieceSlot({required this.title, required this.piece});
+class _TopPieceSlot extends StatelessWidget {
+  const _TopPieceSlot({required this.title, required this.piece});
 
   final String title;
   final Tetromino? piece;
@@ -494,15 +475,25 @@ class _MiniPieceSlot extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 54,
+      width: 42,
       child: Column(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _PanelTitle(title),
-          const SizedBox(height: 6),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              title,
+              maxLines: 1,
+              style: const TextStyle(
+                color: _mutedText,
+                fontSize: 9,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+          const SizedBox(height: 2),
           SizedBox.square(
-            dimension: 48,
+            dimension: 28,
             child: piece == null
                 ? const Center(
                     child: Text('-', style: TextStyle(color: _mutedText)),
@@ -512,6 +503,91 @@ class _MiniPieceSlot extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+class _CompactMetric extends StatelessWidget {
+  const _CompactMetric({required this.label, required this.value});
+
+  final String label;
+  final int value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            label,
+            maxLines: 1,
+            style: const TextStyle(
+              color: _mutedText,
+              fontSize: 9,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+        Text(
+          value.toString(),
+          maxLines: 1,
+          style: const TextStyle(
+            fontSize: 19,
+            fontWeight: FontWeight.w900,
+            fontFeatures: [FontFeature.tabularFigures()],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _TopControls extends StatelessWidget {
+  const _TopControls({
+    required this.paused,
+    required this.musicEnabled,
+    required this.onPause,
+    required this.onMusic,
+    this.framed = true,
+  });
+
+  final bool paused;
+  final bool musicEnabled;
+  final VoidCallback onPause;
+  final VoidCallback onMusic;
+  final bool framed;
+
+  @override
+  Widget build(BuildContext context) {
+    final controls = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _ControlButton(
+          tooltip: paused ? 'Resume' : 'Pause',
+          icon: paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
+          size: framed ? 44 : 42,
+          onPressed: onPause,
+        ),
+        const SizedBox(width: 8),
+        _ControlButton(
+          tooltip: musicEnabled ? 'Mute' : 'Music',
+          icon: musicEnabled
+              ? Icons.volume_up_rounded
+              : Icons.volume_off_rounded,
+          size: framed ? 44 : 42,
+          onPressed: onMusic,
+        ),
+      ],
+    );
+
+    if (!framed) {
+      return controls;
+    }
+
+    return _Panel(child: controls);
   }
 }
 
@@ -731,18 +807,20 @@ class _ControlButton extends StatelessWidget {
     required this.tooltip,
     required this.icon,
     required this.onPressed,
+    this.size = 44,
   });
 
   final String tooltip;
   final IconData icon;
   final VoidCallback onPressed;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
     return Tooltip(
       message: tooltip,
       child: SizedBox.square(
-        dimension: 44,
+        dimension: size,
         child: IconButton.filledTonal(
           visualDensity: VisualDensity.compact,
           icon: Icon(icon),

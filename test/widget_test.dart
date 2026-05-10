@@ -25,7 +25,11 @@ void main() {
     await tester.pump();
 
     final board = find.byKey(const ValueKey('tetris-board'));
+    final topBar = find.byKey(const ValueKey('compact-top-bar'));
     final boardRect = tester.getRect(board);
+    final topBarRect = tester.getRect(topBar);
+    final pauseRect = tester.getRect(find.byTooltip('Pause'));
+    final muteRect = tester.getRect(find.byTooltip('Mute'));
 
     expect(find.text('HOLD'), findsOneWidget);
     expect(find.text('NEXT'), findsOneWidget);
@@ -40,6 +44,9 @@ void main() {
     expect(boardRect.right, 390);
     expect(boardRect.top, greaterThanOrEqualTo(0));
     expect(boardRect.bottom, lessThanOrEqualTo(844));
+    expect(topBarRect.bottom, lessThanOrEqualTo(boardRect.top));
+    expect(pauseRect.bottom, lessThanOrEqualTo(boardRect.top));
+    expect(muteRect.bottom, lessThanOrEqualTo(boardRect.top));
 
     await tester.drag(board, const Offset(0, -160));
     await tester.pump();
