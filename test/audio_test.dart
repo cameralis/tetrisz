@@ -38,6 +38,46 @@ void main() {
     expect(starts, hasLength(1));
     expect(volumes, [1.0]);
   });
+
+  testWidgets('rapid repeated sound effects do not queue delayed playback', (
+    tester,
+  ) async {
+    final soundEffects = AssetTetrisSoundEffects(audioCache: _FakeAudioCache());
+    addTearDown(soundEffects.dispose);
+
+    for (var i = 0; i < 20; i += 1) {
+      soundEffects.play(TetrisSfx.slide, volume: 2);
+    }
+
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+    });
+
+    final starts = platform.calls.where((call) => call.method == 'resume');
+
+    expect(starts, hasLength(1));
+  });
+
+  testWidgets('movement sound effects can restart after the start gap', (
+    tester,
+  ) async {
+    final soundEffects = AssetTetrisSoundEffects(audioCache: _FakeAudioCache());
+    addTearDown(soundEffects.dispose);
+
+    soundEffects.play(TetrisSfx.slide, volume: 2);
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+    });
+
+    soundEffects.play(TetrisSfx.slide, volume: 2);
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+    });
+
+    final starts = platform.calls.where((call) => call.method == 'resume');
+
+    expect(starts, hasLength(2));
+  });
 }
 
 final class _FakeAudioCache extends AudioCache {

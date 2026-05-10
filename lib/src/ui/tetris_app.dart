@@ -47,6 +47,8 @@ const _defaultSfxVolume = 2.0;
 const _maxSfxVolume = 2.0;
 const _musicVolumePreferenceKey = 'tetris.musicVolume';
 const _sfxVolumePreferenceKey = 'tetris.sfxVolume';
+const _movementSfxStartGap = Duration(milliseconds: 55);
+const _rotationSfxStartGap = Duration(milliseconds: 35);
 const _boardAspectRatio =
     TetrisGame.width / (TetrisGame.visibleRows + _bufferSliverRows);
 
@@ -142,30 +144,63 @@ final class NoopTetrisSoundEffects implements TetrisSoundEffects {
 
 final class AssetTetrisSoundEffects implements TetrisSoundEffects {
   AssetTetrisSoundEffects({AudioCache? audioCache})
-    : _audioCache = audioCache ?? AudioCache(prefix: '');
+    : _audioCache = audioCache ?? AudioCache(prefix: '') {
+    _warmUpPools();
+  }
 
   final AudioCache _audioCache;
   final Map<TetrisSfx, Future<AudioPool>> _pools = {};
+  final Stopwatch _clock = Stopwatch()..start();
+  final Map<TetrisSfx, int> _lastStartMilliseconds = {};
+  final Set<TetrisSfx> _startsInProgress = {};
 
   @visibleForTesting
   String get assetPrefix => _audioCache.prefix;
 
   @override
   void play(TetrisSfx sfx, {double volume = 1.0}) {
-    unawaited(_play(sfx, volume));
-  }
-
-  Future<void> _play(TetrisSfx sfx, double volume) async {
     final playbackVolume = (volume.clamp(0.0, _maxSfxVolume) / _maxSfxVolume)
         .toDouble();
     if (playbackVolume <= 0) {
       return;
     }
 
+    if (_startsInProgress.contains(sfx)) {
+      return;
+    }
+
+    final now = _clock.elapsedMilliseconds;
+    final lastStart = _lastStartMilliseconds[sfx];
+    final minimumGap = _minimumStartGapFor(sfx).inMilliseconds;
+    if (lastStart != null && now - lastStart < minimumGap) {
+      return;
+    }
+
+    _lastStartMilliseconds[sfx] = now;
+    _startsInProgress.add(sfx);
+    unawaited(_play(sfx, playbackVolume));
+  }
+
+  Future<void> _play(TetrisSfx sfx, double playbackVolume) async {
     try {
       final pool = await _poolFor(sfx);
       await pool.start(volume: playbackVolume);
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      _startsInProgress.remove(sfx);
+    }
+  }
+
+  Duration _minimumStartGapFor(TetrisSfx sfx) {
+    return switch (sfx) {
+      TetrisSfx.slide || TetrisSfx.softDrop => _movementSfxStartGap,
+      TetrisSfx.rotate || TetrisSfx.counterRotate => _rotationSfxStartGap,
+      TetrisSfx.hardDrop ||
+      TetrisSfx.hardLock ||
+      TetrisSfx.clear ||
+      TetrisSfx.tetris ||
+      TetrisSfx.levelUp => Duration.zero,
+    };
   }
 
   Future<AudioPool> _poolFor(TetrisSfx sfx) {
@@ -177,6 +212,12 @@ final class AssetTetrisSoundEffects implements TetrisSoundEffects {
         maxPlayers: 4,
       ),
     );
+  }
+
+  void _warmUpPools() {
+    for (final sfx in TetrisSfx.values) {
+      unawaited(_poolFor(sfx).then<void>((_) {}, onError: (_, _) {}));
+    }
   }
 
   @override
