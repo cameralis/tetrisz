@@ -67,6 +67,17 @@ Future<void> _flushPreferenceTasks(WidgetTester tester) async {
   await tester.pump();
 }
 
+Future<void> _expectPngSize(String path, Size size) async {
+  final bytes = await File(path).readAsBytes();
+  const pngHeader = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  expect(bytes.take(pngHeader.length), pngHeader, reason: path);
+
+  final data = ByteData.sublistView(bytes);
+  final width = data.getUint32(16);
+  final height = data.getUint32(20);
+  expect(Size(width.toDouble(), height.toDouble()), size, reason: path);
+}
+
 void _expectFreshZeroGame(TetrisGame game) {
   expect(game.score, 0);
   expect(game.lines, 0);
@@ -185,6 +196,40 @@ void main() {
       final bytes = await rootBundle.load(assetPath);
       expect(bytes.lengthInBytes, greaterThan(0), reason: assetPath);
     }
+  });
+
+  test('platform app and splash icons use the provided icon', () async {
+    expect(File('icon.ico').existsSync(), isTrue);
+
+    await _expectPngSize(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-App-1024x1024@1x.png',
+      const Size(1024, 1024),
+    );
+    await _expectPngSize(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-App-60x60@3x.png',
+      const Size(180, 180),
+    );
+    await _expectPngSize(
+      'ios/Runner/Assets.xcassets/LaunchImage.imageset/LaunchImage.png',
+      const Size(168, 168),
+    );
+    await _expectPngSize(
+      'ios/Runner/Assets.xcassets/LaunchImage.imageset/LaunchImage@3x.png',
+      const Size(504, 504),
+    );
+    await _expectPngSize(
+      'android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png',
+      const Size(192, 192),
+    );
+    await _expectPngSize(
+      'android/app/src/main/res/mipmap-xxxhdpi/launch_image.png',
+      const Size(640, 640),
+    );
+    await _expectPngSize(
+      'macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_1024.png',
+      const Size(1024, 1024),
+    );
+    await _expectPngSize('web/icons/Icon-512.png', const Size(512, 512));
   });
 
   testWidgets('renders the playable Tetris surface', (tester) async {
