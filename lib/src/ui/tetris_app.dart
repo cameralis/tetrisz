@@ -23,6 +23,9 @@ const _snapBackDuration = Duration(milliseconds: 120);
 const _snapCommitDuration = Duration(milliseconds: 64);
 const _lineClearAnimationDuration = Duration(milliseconds: 240);
 const _lineClearDropDelay = Duration(milliseconds: 24);
+const _boardImpactDuration = Duration(milliseconds: 260);
+const _boardImpactDownCells = 0.18;
+const _boardImpactSideCells = 0.09;
 const _horizontalIntentFraction = 0.35;
 const _minHorizontalIntentDistance = 20.0;
 const _snapPreviewFraction = 0.25;
@@ -309,6 +312,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   late final Ticker _ticker;
   late final AnimationController _snapBackController;
   late final AnimationController _lineClearController;
+  late final AnimationController _boardImpactController;
   late final TetrisSoundEffects _soundEffects;
   late final TetrisHaptics _haptics;
   late final bool _disposeSoundEffects;
@@ -326,7 +330,11 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   double _snapPreviewOffsetCells = 0;
   double _snapPulseOffsetCells = 0;
   double _snapVisualOffsetCells = 0;
+  Offset _boardImpactOffsetCells = Offset.zero;
   Animation<double> _snapBackAnimation = const AlwaysStoppedAnimation(0);
+  Animation<Offset> _boardImpactAnimation = const AlwaysStoppedAnimation(
+    Offset.zero,
+  );
   bool _horizontalDragLocked = false;
   bool _lineClearAnimating = false;
   bool _musicStarted = false;
@@ -387,6 +395,15 @@ class _TetrisGamePageState extends State<TetrisGamePage>
               });
             }
           });
+    _boardImpactController =
+        AnimationController(vsync: this, duration: _boardImpactDuration)
+          ..addListener(() {
+            if (mounted) {
+              setState(() {
+                _boardImpactOffsetCells = _boardImpactAnimation.value;
+              });
+            }
+          });
     if (widget.enableAudio) {
       _musicPlayer = widget.musicPlayer ?? AssetTetrisMusicPlayer();
       _disposeMusicPlayer = widget.musicPlayer == null;
@@ -407,6 +424,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _softDropTimer?.cancel();
     _snapBackController.dispose();
     _lineClearController.dispose();
+    _boardImpactController.dispose();
     _ticker.dispose();
     unawaited(_musicCompleteSubscription?.cancel() ?? Future.value());
     if (_disposeSoundEffects) {
@@ -648,11 +666,13 @@ class _TetrisGamePageState extends State<TetrisGamePage>
 
   void _restart() {
     _lineClearController.stop();
+    _boardImpactController.stop();
     _lineClearAnimationSerial += 1;
     setState(() {
       _lineClearAnimating = false;
       _lineClearSnapshot = null;
       _lineClearHiddenColumnCount = 0;
+      _boardImpactOffsetCells = Offset.zero;
       _game.restart();
     });
     unawaited(_restartMusicPlaylist());
@@ -755,10 +775,15 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     if (!_boardAcceptsInput) {
       return;
     }
+    final impactOffset = _hardDropImpactOffset();
+    final lockCount = _game.lockCount;
     _stopSoftDrop();
     _snapBackController.stop();
     _resetSnapOffsets();
     _commitHardDrop();
+    if (_game.lockCount > lockCount) {
+      _startBoardImpact(impactOffset);
+    }
   }
 
   void _commitHardDrop() {
@@ -769,6 +794,35 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       didSucceed: (_, before) => _game.lockCount > before.lockCount,
       suppressLockSfx: true,
     );
+  }
+
+  Offset _hardDropImpactOffset() {
+    final cells = _game.ghostCells.toList(growable: false);
+    if (cells.isEmpty) {
+      return const Offset(0, _boardImpactDownCells);
+    }
+
+    final centerX =
+        cells.fold<double>(0, (sum, cell) => sum + cell.x + 0.5) / cells.length;
+    final sideBias = ((centerX - TetrisGame.width / 2) / (TetrisGame.width / 2))
+        .clamp(-1.0, 1.0)
+        .toDouble();
+    return Offset(sideBias * _boardImpactSideCells, _boardImpactDownCells);
+  }
+
+  void _startBoardImpact(Offset impactOffset) {
+    _boardImpactController.stop();
+    _boardImpactAnimation = Tween<Offset>(begin: impactOffset, end: Offset.zero)
+        .animate(
+          CurvedAnimation(
+            parent: _boardImpactController,
+            curve: Curves.elasticOut,
+          ),
+        );
+    setState(() {
+      _boardImpactOffsetCells = impactOffset;
+    });
+    _boardImpactController.forward(from: 0);
   }
 
   void _rotateClockwise() {
@@ -1157,6 +1211,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
                       painter: _BoardPainter(
                         game: _game,
                         activeHorizontalOffset: _snapVisualOffsetCells,
+                        boardImpactOffset: _boardImpactOffsetCells,
                         lineClearSnapshot: _lineClearSnapshot,
                         lineClearHiddenColumns: _lineClearHiddenColumns,
                       ),
@@ -1893,12 +1948,14 @@ class _BoardPainter extends CustomPainter {
   const _BoardPainter({
     required this.game,
     required this.activeHorizontalOffset,
+    required this.boardImpactOffset,
     required this.lineClearSnapshot,
     required this.lineClearHiddenColumns,
   });
 
   final TetrisGame game;
   final double activeHorizontalOffset;
+  final Offset boardImpactOffset;
   final LineClearAnimationSnapshot? lineClearSnapshot;
   final Set<int> lineClearHiddenColumns;
 
@@ -1917,7 +1974,13 @@ class _BoardPainter extends CustomPainter {
     final visibleOrigin = origin + Offset(0, cellSize * _bufferSliverRows);
     final boardRect = origin & Size(boardWidth, boardHeight);
     final radius = Radius.circular(cellSize * 0.16);
+    final impactOffset = Offset(
+      boardImpactOffset.dx * cellSize,
+      boardImpactOffset.dy * cellSize,
+    );
 
+    canvas.save();
+    canvas.translate(impactOffset.dx, impactOffset.dy);
     canvas.drawRRect(
       RRect.fromRectAndRadius(boardRect, const Radius.circular(8)),
       Paint()..color = _boardBack,
@@ -1973,6 +2036,7 @@ class _BoardPainter extends CustomPainter {
         }
       }
     }
+    canvas.restore();
   }
 
   void _drawBufferSliver(

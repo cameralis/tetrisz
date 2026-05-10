@@ -57,6 +57,19 @@ double _boardActiveHorizontalOffset(WidgetTester tester) {
   return (boardPaint.painter as dynamic).activeHorizontalOffset as double;
 }
 
+Offset _boardImpactOffset(WidgetTester tester) {
+  final boardPaints = tester.widgetList<CustomPaint>(
+    find.descendant(
+      of: find.byKey(const ValueKey('tetris-board')),
+      matching: find.byType(CustomPaint),
+    ),
+  );
+  final boardPaint = boardPaints.singleWhere(
+    (paint) => paint.painter.runtimeType.toString() == '_BoardPainter',
+  );
+  return (boardPaint.painter as dynamic).boardImpactOffset as Offset;
+}
+
 Future<void> _finishLineClearAnimation(WidgetTester tester) async {
   await tester.pump(
     _lineClearAnimationDuration + const Duration(milliseconds: 1),
@@ -792,6 +805,50 @@ void main() {
 
     expect(game.lockCount, startLockCount + 1);
     expect(_visibleLockedCellCount(game), greaterThan(0));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('hard drop impact springs the board down and right', (
+    tester,
+  ) async {
+    _usePhoneViewport(tester);
+    final game = _visiblePieceGame(Tetromino.t);
+    while (game.moveRight()) {}
+
+    await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
+    await tester.pump();
+
+    final board = find.byKey(const ValueKey('tetris-board'));
+    await tester.drag(board, const Offset(0, 96));
+    await tester.pump();
+
+    final impact = _boardImpactOffset(tester);
+    expect(impact.dx, greaterThan(0));
+    expect(impact.dy, greaterThan(0));
+
+    await tester.pump(const Duration(milliseconds: 320));
+
+    expect(_boardImpactOffset(tester), Offset.zero);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('hard drop impact leans left when the piece lands left', (
+    tester,
+  ) async {
+    _usePhoneViewport(tester);
+    final game = _visiblePieceGame(Tetromino.t);
+    while (game.moveLeft()) {}
+
+    await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
+    await tester.pump();
+
+    final board = find.byKey(const ValueKey('tetris-board'));
+    await tester.drag(board, const Offset(0, 96));
+    await tester.pump();
+
+    final impact = _boardImpactOffset(tester);
+    expect(impact.dx, lessThan(0));
+    expect(impact.dy, greaterThan(0));
     expect(tester.takeException(), isNull);
   });
 
