@@ -18,7 +18,7 @@ const _bufferSliverRows = 0.25;
 const _compactTopBarHeight = 54.0;
 const _maxTickDelta = Duration(milliseconds: 250);
 const _snapBackDuration = Duration(milliseconds: 120);
-const _snapCommitDuration = Duration(milliseconds: 90);
+const _snapCommitDuration = Duration(milliseconds: 140);
 const _horizontalIntentFraction = 0.35;
 const _minHorizontalIntentDistance = 20.0;
 const _snapPreviewFraction = 0.25;
@@ -82,6 +82,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   double _snapVisualOffsetCells = 0;
   Animation<double> _snapBackAnimation = const AlwaysStoppedAnimation(0);
   bool _horizontalDragLocked = false;
+  bool _snapCommitAnimating = false;
   bool _musicEnabled = true;
   bool _musicStarted = false;
 
@@ -221,6 +222,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _dragY = 0;
     _snapDragX = 0;
     _horizontalDragLocked = false;
+    _snapCommitAnimating = false;
     unawaited(_playMusic());
   }
 
@@ -253,9 +255,14 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       return;
     }
 
-    _snapBackController.stop();
+    final commitAnimating =
+        _snapCommitAnimating && _snapBackController.isAnimating;
     var committedColumns = 0;
     var targetOffset = _snapVisualOffsetCells;
+    final continuityOffset = _snapVisualOffsetCells;
+    if (!commitAnimating) {
+      _snapBackController.stop();
+    }
     setState(() {
       while (_snapDragX.abs() >= snapDistance) {
         final direction = _snapDragX.sign.toInt();
@@ -277,15 +284,28 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       }
 
       if (committedColumns == 0) {
-        _snapVisualOffsetCells = targetOffset;
+        if (!commitAnimating) {
+          _snapVisualOffsetCells = targetOffset;
+        }
       } else {
-        _snapVisualOffsetCells =
-            (committedColumns.sign * (_snapPreviewFraction - 1)).toDouble();
+        _snapVisualOffsetCells = continuityOffset.abs() < 0.001
+            ? (committedColumns.sign * (_snapPreviewFraction - 1)).toDouble()
+            : continuityOffset - committedColumns;
       }
     });
 
     if (committedColumns != 0) {
-      _animateSnapVisualOffsetTo(targetOffset, _snapCommitDuration);
+      _animateSnapVisualOffsetTo(
+        targetOffset,
+        _snapCommitDuration,
+        commit: true,
+      );
+    } else if (commitAnimating) {
+      _animateSnapVisualOffsetTo(
+        targetOffset,
+        _snapCommitDuration,
+        commit: true,
+      );
     }
   }
 
@@ -306,6 +326,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _dragY = 0;
     _snapDragX = 0;
     _horizontalDragLocked = false;
+    _snapCommitAnimating = false;
     _dragPointer = null;
   }
 
@@ -328,6 +349,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _dragY = 0;
     _snapDragX = 0;
     _horizontalDragLocked = false;
+    _snapCommitAnimating = false;
   }
 
   void _moveHorizontally(int direction) {
@@ -367,10 +389,16 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _animateSnapVisualOffsetTo(0, _snapBackDuration);
   }
 
-  void _animateSnapVisualOffsetTo(double target, Duration duration) {
+  void _animateSnapVisualOffsetTo(
+    double target,
+    Duration duration, {
+    bool commit = false,
+  }) {
     _snapBackController.stop();
+    _snapCommitAnimating = commit;
     if ((_snapVisualOffsetCells - target).abs() < 0.001) {
       _snapVisualOffsetCells = target;
+      _snapCommitAnimating = false;
       return;
     }
 
