@@ -6,6 +6,8 @@ import 'package:tetris/src/ui/tetris_app.dart';
 
 const _phoneViewport = Size(390, 844);
 const _staleFrameGap = Duration(seconds: 20);
+const _partialSnapDrag = Offset(24, 0);
+const _committingSnapDrag = Offset(34, 0);
 
 void _usePhoneViewport(WidgetTester tester) {
   tester.view.physicalSize = _phoneViewport;
@@ -26,6 +28,19 @@ int _visibleLockedCellCount(TetrisGame game) {
   return count;
 }
 
+double _boardActiveHorizontalOffset(WidgetTester tester) {
+  final boardPaints = tester.widgetList<CustomPaint>(
+    find.descendant(
+      of: find.byKey(const ValueKey('tetris-board')),
+      matching: find.byType(CustomPaint),
+    ),
+  );
+  final boardPaint = boardPaints.singleWhere(
+    (paint) => paint.painter.runtimeType.toString() == '_BoardPainter',
+  );
+  return (boardPaint.painter as dynamic).activeHorizontalOffset as double;
+}
+
 void _expectFreshZeroGame(TetrisGame game) {
   expect(game.score, 0);
   expect(game.lines, 0);
@@ -38,6 +53,14 @@ void _expectFreshZeroGame(TetrisGame game) {
     game.activeCells.where((cell) => cell.y >= TetrisGame.bufferRows),
     isEmpty,
   );
+}
+
+TetrisGame _visiblePieceGame(Tetromino type) {
+  final game = TetrisGame(scriptedPieces: [type, Tetromino.o, Tetromino.i]);
+  for (var i = 0; i < 4; i += 1) {
+    game.softDropStep();
+  }
+  return game;
 }
 
 void main() {
@@ -136,4 +159,110 @@ void main() {
     _expectFreshZeroGame(game);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('horizontal drag previews block snap without moving column', (
+    tester,
+  ) async {
+    _usePhoneViewport(tester);
+    final game = _visiblePieceGame(Tetromino.t);
+    final startX = game.active!.x;
+
+    await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
+    await tester.pump();
+
+    final board = find.byKey(const ValueKey('tetris-board'));
+    final gesture = await tester.startGesture(tester.getCenter(board));
+    await gesture.moveBy(_partialSnapDrag);
+    await tester.pump();
+
+    expect(game.active!.x, startX);
+    expect(
+      _boardActiveHorizontalOffset(tester),
+      closeTo(
+        _partialSnapDrag.dx / (_phoneViewport.width / TetrisGame.width),
+        0.01,
+      ),
+    );
+    await expectLater(
+      find.byType(Scaffold),
+      matchesGoldenFile('goldens/block_snap_partial_drag.png'),
+    );
+
+    await gesture.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 140));
+
+    expect(game.active!.x, startX);
+    expect(_boardActiveHorizontalOffset(tester), 0);
+    await expectLater(
+      find.byType(Scaffold),
+      matchesGoldenFile('goldens/block_snap_after_release.png'),
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('horizontal drag snaps to the next column after enough pull', (
+    tester,
+  ) async {
+    _usePhoneViewport(tester);
+    final game = _visiblePieceGame(Tetromino.t);
+    final startX = game.active!.x;
+
+    await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
+    await tester.pump();
+
+    final board = find.byKey(const ValueKey('tetris-board'));
+    final gesture = await tester.startGesture(tester.getCenter(board));
+    await gesture.moveBy(_committingSnapDrag);
+    await tester.pump();
+
+    expect(game.active!.x, startX + 1);
+
+    await gesture.up();
+    await tester.pump(const Duration(milliseconds: 140));
+
+    expect(game.active!.x, startX + 1);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('horizontal drag resists blocked wall snaps', (tester) async {
+    _usePhoneViewport(tester);
+    final game = _visiblePieceGame(Tetromino.t);
+    while (game.moveLeft()) {}
+    final wallX = game.active!.x;
+
+    await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
+    await tester.pump();
+
+    final board = find.byKey(const ValueKey('tetris-board'));
+    final gesture = await tester.startGesture(tester.getCenter(board));
+    await gesture.moveBy(-_committingSnapDrag);
+    await tester.pump();
+
+    expect(game.active!.x, wallX);
+
+    await gesture.up();
+    await tester.pump(const Duration(milliseconds: 140));
+
+    expect(game.active!.x, wallX);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'vertical swipe still hard drops while horizontal snap is active',
+    (tester) async {
+      _usePhoneViewport(tester);
+      final game = _visiblePieceGame(Tetromino.t);
+
+      await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
+      await tester.pump();
+
+      final board = find.byKey(const ValueKey('tetris-board'));
+      await tester.drag(board, const Offset(0, 96));
+      await tester.pump();
+
+      expect(_visibleLockedCellCount(game), greaterThan(0));
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

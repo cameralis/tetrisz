@@ -17,6 +17,9 @@ const _boardBack = Color(0xFF07080A);
 const _bufferSliverRows = 0.25;
 const _compactTopBarHeight = 54.0;
 const _maxTickDelta = Duration(milliseconds: 250);
+const _snapBackDuration = Duration(milliseconds: 120);
+const _snapCommitFraction = 0.7;
+const _snapBlockedFraction = 0.22;
 const _boardAspectRatio =
     TetrisGame.width / (TetrisGame.visibleRows + _bufferSliverRows);
 
@@ -60,15 +63,20 @@ class TetrisGamePage extends StatefulWidget {
 }
 
 class _TetrisGamePageState extends State<TetrisGamePage>
-    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   late final TetrisGame _game;
   late final Ticker _ticker;
+  late final AnimationController _snapBackController;
   AudioPlayer? _musicPlayer;
   Timer? _softDropTimer;
 
   Duration _lastFrameElapsed = Duration.zero;
+  int? _dragPointer;
   double _dragX = 0;
   double _dragY = 0;
+  double _snapDragX = 0;
+  double _snapVisualOffsetCells = 0;
+  Animation<double> _snapBackAnimation = const AlwaysStoppedAnimation(0);
   bool _musicEnabled = true;
   bool _musicStarted = false;
 
@@ -78,6 +86,15 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     WidgetsBinding.instance.addObserver(this);
     _game = widget.game ?? TetrisGame();
     _ticker = createTicker(_onFrame)..start();
+    _snapBackController =
+        AnimationController(vsync: this, duration: _snapBackDuration)
+          ..addListener(() {
+            if (mounted) {
+              setState(() {
+                _snapVisualOffsetCells = _snapBackAnimation.value;
+              });
+            }
+          });
     if (widget.enableAudio) {
       _musicPlayer = AudioPlayer();
       unawaited(_playMusic());
@@ -88,6 +105,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _softDropTimer?.cancel();
+    _snapBackController.dispose();
     _ticker.dispose();
     unawaited(_musicPlayer?.dispose() ?? Future.value());
     super.dispose();
@@ -191,44 +209,109 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _softDropTimer = null;
   }
 
-  void _handlePanUpdate(DragUpdateDetails details) {
-    _dragX += details.delta.dx;
-    _dragY += details.delta.dy;
+  void _handlePointerDown(PointerDownEvent event) {
+    _dragPointer = event.pointer;
+    _snapBackController.stop();
+    _dragX = 0;
+    _dragY = 0;
+    _snapDragX = 0;
+  }
 
-    const horizontalStep = 28.0;
-    if (_dragX.abs() < horizontalStep || _dragX.abs() < _dragY.abs()) {
+  void _handlePointerMove(PointerMoveEvent event, double cellSize) {
+    if (_dragPointer != event.pointer) {
       return;
     }
 
-    while (_dragX.abs() >= horizontalStep) {
-      final direction = _dragX.sign;
-      _runAction(() {
-        if (direction < 0) {
-          _game.moveLeft();
-        } else {
-          _game.moveRight();
+    _dragX += event.delta.dx;
+    _dragY += event.delta.dy;
+    _snapDragX += event.delta.dx;
+
+    if (_dragX.abs() < _dragY.abs()) {
+      return;
+    }
+
+    final snapDistance = cellSize * _snapCommitFraction;
+    if (snapDistance <= 0) {
+      return;
+    }
+
+    _snapBackController.stop();
+    var moved = false;
+    var blocked = false;
+
+    setState(() {
+      while (_snapDragX.abs() >= snapDistance && !blocked) {
+        final direction = _snapDragX.sign;
+        final didMove = direction < 0 ? _game.moveLeft() : _game.moveRight();
+        if (!didMove) {
+          blocked = true;
+          break;
         }
-      });
-      _dragX -= horizontalStep * direction;
+        moved = true;
+        _snapDragX -= snapDistance * direction;
+      }
+
+      final limit = blocked ? _snapBlockedFraction : _snapCommitFraction;
+      _snapVisualOffsetCells = (_snapDragX / cellSize).clamp(-limit, limit);
+    });
+
+    if (moved) {
+      unawaited(_playMusic());
     }
   }
 
-  void _handlePanEnd(DragEndDetails details) {
+  void _handlePointerUp(PointerUpEvent event) {
+    if (_dragPointer != event.pointer) {
+      return;
+    }
+    _finishDrag();
+    _dragPointer = null;
+  }
+
+  void _handlePointerCancel(PointerCancelEvent event) {
+    if (_dragPointer != event.pointer) {
+      return;
+    }
+    _animateSnapBack();
+    _dragX = 0;
+    _dragY = 0;
+    _snapDragX = 0;
+    _dragPointer = null;
+  }
+
+  void _finishDrag() {
     const verticalThreshold = 48.0;
     if (_dragY.abs() >= verticalThreshold && _dragY.abs() > _dragX.abs()) {
+      _snapBackController.stop();
+      _snapVisualOffsetCells = 0;
       if (_dragY < 0) {
         _runAction(_game.hold);
       } else {
         _runAction(_game.hardDrop);
       }
+    } else {
+      _animateSnapBack();
     }
     _dragX = 0;
     _dragY = 0;
+    _snapDragX = 0;
   }
 
-  void _handlePanCancel() {
-    _dragX = 0;
-    _dragY = 0;
+  void _animateSnapBack() {
+    _snapBackController.stop();
+    if (_snapVisualOffsetCells.abs() < 0.001) {
+      _snapVisualOffsetCells = 0;
+      return;
+    }
+
+    _snapBackAnimation = Tween<double>(begin: _snapVisualOffsetCells, end: 0)
+        .animate(
+          CurvedAnimation(
+            parent: _snapBackController,
+            curve: Curves.easeOutCubic,
+          ),
+        );
+    _snapBackController.forward(from: 0);
   }
 
   @override
@@ -360,43 +443,55 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   }
 
   Widget _buildBoard(double width, double height) {
+    final cellSize = math.min(
+      width / TetrisGame.width,
+      height / (TetrisGame.visibleRows + _bufferSliverRows),
+    );
+
     return SizedBox(
       key: const ValueKey('tetris-board'),
       width: width,
       height: height,
       child: LayoutBuilder(
         builder: (context, constraints) {
-          return GestureDetector(
+          return Listener(
             behavior: HitTestBehavior.opaque,
-            onTapUp: (details) {
-              if (details.localPosition.dx > constraints.maxWidth / 2) {
-                _runAction(_game.rotateClockwise);
-              } else {
-                _runAction(_game.rotateCounterClockwise);
-              }
-            },
-            onPanUpdate: _handlePanUpdate,
-            onPanEnd: _handlePanEnd,
-            onPanCancel: _handlePanCancel,
-            onLongPressStart: (_) => _startSoftDrop(),
-            onLongPressEnd: (_) => _stopSoftDrop(),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                RepaintBoundary(
-                  child: CustomPaint(
-                    painter: _BoardPainter(game: _game),
-                    size: Size.infinite,
+            onPointerDown: _handlePointerDown,
+            onPointerMove: (event) => _handlePointerMove(event, cellSize),
+            onPointerUp: _handlePointerUp,
+            onPointerCancel: _handlePointerCancel,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTapUp: (details) {
+                if (details.localPosition.dx > constraints.maxWidth / 2) {
+                  _runAction(_game.rotateClockwise);
+                } else {
+                  _runAction(_game.rotateCounterClockwise);
+                }
+              },
+              onLongPressStart: (_) => _startSoftDrop(),
+              onLongPressEnd: (_) => _stopSoftDrop(),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  RepaintBoundary(
+                    child: CustomPaint(
+                      painter: _BoardPainter(
+                        game: _game,
+                        activeHorizontalOffset: _snapVisualOffsetCells,
+                      ),
+                      size: Size.infinite,
+                    ),
                   ),
-                ),
-                if (_game.gameOver || _game.paused)
-                  _GameOverlay(
-                    gameOver: _game.gameOver,
-                    score: _game.score,
-                    onRestart: _restart,
-                    onResume: _togglePause,
-                  ),
-              ],
+                  if (_game.gameOver || _game.paused)
+                    _GameOverlay(
+                      gameOver: _game.gameOver,
+                      score: _game.score,
+                      onRestart: _restart,
+                      onResume: _togglePause,
+                    ),
+                ],
+              ),
             ),
           );
         },
@@ -1001,9 +1096,13 @@ class _Metric extends StatelessWidget {
 }
 
 class _BoardPainter extends CustomPainter {
-  const _BoardPainter({required this.game});
+  const _BoardPainter({
+    required this.game,
+    required this.activeHorizontalOffset,
+  });
 
   final TetrisGame game;
+  final double activeHorizontalOffset;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1048,14 +1147,28 @@ class _BoardPainter extends CustomPainter {
     for (final cell in game.ghostCells) {
       final y = cell.y - TetrisGame.bufferRows;
       if (y >= 0 && y < TetrisGame.visibleRows) {
-        _drawGhost(canvas, visibleOrigin, cellSize, cell.x, y, cell.type);
+        _drawGhost(
+          canvas,
+          visibleOrigin,
+          cellSize,
+          cell.x + activeHorizontalOffset,
+          y,
+          cell.type,
+        );
       }
     }
 
     for (final cell in game.activeCells) {
       final y = cell.y - TetrisGame.bufferRows;
       if (y >= 0 && y < TetrisGame.visibleRows) {
-        _drawMino(canvas, visibleOrigin, cellSize, cell.x, y, cell.type);
+        _drawMino(
+          canvas,
+          visibleOrigin,
+          cellSize,
+          cell.x + activeHorizontalOffset,
+          y,
+          cell.type,
+        );
       }
     }
   }
@@ -1096,13 +1209,27 @@ class _BoardPainter extends CustomPainter {
     for (final cell in game.ghostCells) {
       drawSliverCell(
         cell,
-        () => _drawGhost(canvas, hiddenOrigin, cellSize, cell.x, 0, cell.type),
+        () => _drawGhost(
+          canvas,
+          hiddenOrigin,
+          cellSize,
+          cell.x + activeHorizontalOffset,
+          0,
+          cell.type,
+        ),
       );
     }
     for (final cell in game.activeCells) {
       drawSliverCell(
         cell,
-        () => _drawMino(canvas, hiddenOrigin, cellSize, cell.x, 0, cell.type),
+        () => _drawMino(
+          canvas,
+          hiddenOrigin,
+          cellSize,
+          cell.x + activeHorizontalOffset,
+          0,
+          cell.type,
+        ),
       );
     }
     canvas.restore();
@@ -1146,9 +1273,9 @@ class _PiecePreviewPainter extends CustomPainter {
   }
 }
 
-Rect _cellRect(Offset origin, double cellSize, int x, int y) {
+Rect _cellRect(Offset origin, double cellSize, num x, int y) {
   return Rect.fromLTWH(
-    origin.dx + x * cellSize,
+    origin.dx + x.toDouble() * cellSize,
     origin.dy + y * cellSize,
     cellSize,
     cellSize,
@@ -1159,7 +1286,7 @@ void _drawMino(
   Canvas canvas,
   Offset origin,
   double cellSize,
-  int x,
+  num x,
   int y,
   Tetromino type,
 ) {
@@ -1186,7 +1313,7 @@ void _drawGhost(
   Canvas canvas,
   Offset origin,
   double cellSize,
-  int x,
+  num x,
   int y,
   Tetromino type,
 ) {
