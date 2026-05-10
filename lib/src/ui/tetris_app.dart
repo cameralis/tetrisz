@@ -11,12 +11,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../game/tetris_game.dart';
 import '../game/tetromino.dart';
 
-const _background = Color(0xFF101114);
+const _boardBack = Color(0xFF07080A);
+const _background = _boardBack;
 const _panel = Color(0xFF1B1D22);
 const _text = Color(0xFFF3F6FA);
 const _mutedText = Color(0xFFA5ADBA);
 const _gridLine = Color(0x12FFFFFF);
-const _boardBack = Color(0xFF07080A);
 const _bufferSliverRows = 0.25;
 const _compactTopBarHeight = 54.0;
 const _maxTickDelta = Duration(milliseconds: 250);
