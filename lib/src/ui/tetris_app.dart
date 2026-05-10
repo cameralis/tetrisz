@@ -60,10 +60,15 @@ final class NoopTetrisSoundEffects implements TetrisSoundEffects {
 }
 
 final class AssetTetrisSoundEffects implements TetrisSoundEffects {
-  AssetTetrisSoundEffects({this.volume = 0.65});
+  AssetTetrisSoundEffects({this.volume = 1.0, AudioCache? audioCache})
+    : _audioCache = audioCache ?? AudioCache(prefix: '');
 
   final double volume;
+  final AudioCache _audioCache;
   final Map<TetrisSfx, Future<AudioPool>> _pools = {};
+
+  @visibleForTesting
+  String get assetPrefix => _audioCache.prefix;
 
   @override
   void play(TetrisSfx sfx) {
@@ -82,8 +87,8 @@ final class AssetTetrisSoundEffects implements TetrisSoundEffects {
       sfx,
       () => AudioPool.createFromAsset(
         path: sfx.assetPath,
+        audioCache: _audioCache,
         maxPlayers: 4,
-        playerMode: PlayerMode.lowLatency,
       ),
     );
   }

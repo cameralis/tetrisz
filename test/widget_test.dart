@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tetris/src/game/tetris_game.dart';
 import 'package:tetris/src/game/tetromino.dart';
@@ -107,9 +108,12 @@ final class _RecordingSoundEffects implements TetrisSoundEffects {
 }
 
 void main() {
-  test('all sound effect assets exist', () {
+  testWidgets('all sound effect assets are loadable', (tester) async {
+    expect(AssetTetrisSoundEffects().assetPrefix, isEmpty);
     for (final sfx in TetrisSfx.values) {
       expect(File(sfx.assetPath).existsSync(), isTrue, reason: sfx.assetPath);
+      final bytes = await rootBundle.load(sfx.assetPath);
+      expect(bytes.lengthInBytes, greaterThan(0), reason: sfx.assetPath);
     }
   });
 
