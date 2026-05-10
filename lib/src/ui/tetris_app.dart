@@ -36,7 +36,9 @@ const _lineClearSnapParticlesInRow = TetrisGame.width * 5;
 const _lineClearSnapParticlesInColumn = TetrisGame.visibleRows * 5;
 const _lineClearSnapWarmUpSize = Size(320, 640);
 @visibleForTesting
-const tetrisLineClearSnapParticleHdrBoost = 2.8;
+const tetrisLineClearSnapParticleHdrBoost = 4.25;
+@visibleForTesting
+const tetrisLineClearSnapParticleGlowBoost = 0.55;
 const _horizontalIntentFraction = 0.35;
 const _minHorizontalIntentDistance = 20.0;
 const _snapPreviewFraction = 0.25;
@@ -2161,8 +2163,9 @@ void _configureLineClearSnapShader({
   shader.setFloat(4, _lineClearSnapParticlesInColumn.toDouble());
   shader.setFloat(5, _lineClearSnapParticleSpeed);
   shader.setFloat(6, tetrisLineClearSnapParticleHdrBoost);
-  shader.setFloat(7, size.width);
-  shader.setFloat(8, size.height);
+  shader.setFloat(7, tetrisLineClearSnapParticleGlowBoost);
+  shader.setFloat(8, size.width);
+  shader.setFloat(9, size.height);
   shader.setImageSampler(0, image);
 }
 
@@ -2247,87 +2250,64 @@ void _drawGhostPiece(
     return;
   }
 
-  final type = cells.first.type;
-  final path = _ghostPiecePath(origin, cellSize, cells, horizontalOffset);
-  final outlineColor = tetrisGhostHdrOutlineColorFor(type);
-
-  canvas.drawPath(
-    path,
-    Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = math.max(4.8, cellSize * 0.13)
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round
-      ..maskFilter = MaskFilter.blur(BlurStyle.normal, cellSize * 0.32)
-      ..color = outlineColor.withValues(alpha: 0.065),
-  );
-  canvas.drawPath(
-    path,
-    Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = math.max(3.4, cellSize * 0.08)
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round
-      ..maskFilter = MaskFilter.blur(BlurStyle.normal, cellSize * 0.18)
-      ..color = outlineColor.withValues(alpha: 0.12),
-  );
-  canvas.drawPath(
-    path,
-    Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = math.max(2.2, cellSize * 0.052)
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round
-      ..maskFilter = MaskFilter.blur(BlurStyle.normal, cellSize * 0.045)
-      ..color = outlineColor.withValues(alpha: 0.28),
-  );
-  canvas.drawPath(
-    path,
-    Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = math.max(1.8, cellSize * 0.04)
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round
-      ..color = outlineColor.withValues(alpha: 0.92),
-  );
-}
-
-Path _ghostPiecePath(
-  Offset origin,
-  double cellSize,
-  List<MinoCell> cells,
-  double horizontalOffset,
-) {
-  var path = Path();
-  var hasPath = false;
-  final inset = cellSize * 0.12;
-  final occupied = cells.map((cell) => GridPoint(cell.x, cell.y)).toSet();
-
   for (final cell in cells) {
-    final hasLeft = occupied.contains(GridPoint(cell.x - 1, cell.y));
-    final hasRight = occupied.contains(GridPoint(cell.x + 1, cell.y));
-    final hasUp = occupied.contains(GridPoint(cell.x, cell.y - 1));
-    final hasDown = occupied.contains(GridPoint(cell.x, cell.y + 1));
-    final cellRect = _cellRect(
+    _drawGhost(
+      canvas,
       origin,
       cellSize,
       cell.x + horizontalOffset,
       cell.y,
+      cell.type,
     );
-    final rect = Rect.fromLTRB(
-      cellRect.left + (hasLeft ? 0 : inset),
-      cellRect.top + (hasUp ? 0 : inset),
-      cellRect.right - (hasRight ? 0 : inset),
-      cellRect.bottom - (hasDown ? 0 : inset),
-    );
-    final cellPath = Path()..addRect(rect);
-    path = hasPath
-        ? Path.combine(PathOperation.union, path, cellPath)
-        : cellPath;
-    hasPath = true;
   }
+}
 
-  return path;
+void _drawGhost(
+  Canvas canvas,
+  Offset origin,
+  double cellSize,
+  num x,
+  num y,
+  Tetromino type,
+) {
+  final rect = _cellRect(origin, cellSize, x, y).deflate(cellSize * 0.1);
+  final rrect = RRect.fromRectAndRadius(rect, Radius.circular(cellSize * 0.13));
+  final outlineColor = tetrisGhostHdrOutlineColorFor(type);
+  canvas.drawRRect(
+    rrect,
+    Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = math.max(4.8, cellSize * 0.13)
+      ..strokeJoin = StrokeJoin.round
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, cellSize * 0.32)
+      ..color = outlineColor.withValues(alpha: 0.065),
+  );
+  canvas.drawRRect(
+    rrect,
+    Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = math.max(3.4, cellSize * 0.08)
+      ..strokeJoin = StrokeJoin.round
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, cellSize * 0.18)
+      ..color = outlineColor.withValues(alpha: 0.12),
+  );
+  canvas.drawRRect(
+    rrect,
+    Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = math.max(2.2, cellSize * 0.052)
+      ..strokeJoin = StrokeJoin.round
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, cellSize * 0.045)
+      ..color = outlineColor.withValues(alpha: 0.28),
+  );
+  canvas.drawRRect(
+    rrect,
+    Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = math.max(1.8, cellSize * 0.04)
+      ..strokeJoin = StrokeJoin.round
+      ..color = outlineColor.withValues(alpha: 0.92),
+  );
 }
 
 @visibleForTesting

@@ -17,6 +17,7 @@ uniform float particlesInRow;
 uniform float particlesInColumn;
 uniform float particleSpeed;
 uniform float particleHdrBoost;
+uniform float particleGlowBoost;
 uniform vec2 uSize;
 uniform sampler2D uImageTexture;
 
@@ -86,7 +87,13 @@ void main() {
       vec4 color = texture(uImageTexture, sourceUv);
       float fadeAge = max(0.0, t - (particleLifetime - fadeOutDuration));
       float opacity = max(0.0, 1.0 - fadeAge / fadeOutDuration);
-      fragColor = vec4(hdrParticleColor(color.rgb) * opacity, color.a * opacity);
+      vec2 local = (sourceUv - center) / vec2(particleWidth, particleHeight);
+      float coreGlow = smoothstep(0.82, 0.0, length(local));
+      float glow = 1.0 + particleGlowBoost * coreGlow;
+      fragColor = vec4(
+        hdrParticleColor(color.rgb) * glow * opacity,
+        color.a * opacity
+      );
       return;
     }
   }

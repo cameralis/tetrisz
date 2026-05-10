@@ -334,12 +334,15 @@ void main() {
     expect(sceneDelegate, contains('contentsHeadroom = max'));
   });
 
-  test('line clear snap particles use an HDR shader boost', () {
+  test('line clear snap particles use an HDR shader glow boost', () {
     final shader = File('shaders/line_clear_snap.glsl').readAsStringSync();
 
-    expect(tetrisLineClearSnapParticleHdrBoost, greaterThan(1));
+    expect(tetrisLineClearSnapParticleHdrBoost, greaterThan(4));
+    expect(tetrisLineClearSnapParticleGlowBoost, greaterThan(0));
     expect(shader, contains('uniform float particleHdrBoost;'));
+    expect(shader, contains('uniform float particleGlowBoost;'));
     expect(shader, contains('hdrParticleColor(color.rgb)'));
+    expect(shader, contains('1.0 + particleGlowBoost * coreGlow'));
   });
 
   test('platform app and splash icons use the provided icon', () async {
