@@ -14,7 +14,9 @@ const _text = Color(0xFFF3F6FA);
 const _mutedText = Color(0xFFA5ADBA);
 const _gridLine = Color(0x12FFFFFF);
 const _boardBack = Color(0xFF07080A);
-const _boardAspectRatio = TetrisGame.width / TetrisGame.visibleRows;
+const _bufferSliverRows = 0.25;
+const _boardAspectRatio =
+    TetrisGame.width / (TetrisGame.visibleRows + _bufferSliverRows);
 
 class TetrisApp extends StatelessWidget {
   const TetrisApp({super.key, this.enableAudio = true});
@@ -908,14 +910,15 @@ class _BoardPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final cellSize = math.min(
       size.width / TetrisGame.width,
-      size.height / TetrisGame.visibleRows,
+      size.height / (TetrisGame.visibleRows + _bufferSliverRows),
     );
     final boardWidth = cellSize * TetrisGame.width;
-    final boardHeight = cellSize * TetrisGame.visibleRows;
+    final boardHeight = cellSize * (TetrisGame.visibleRows + _bufferSliverRows);
     final origin = Offset(
       (size.width - boardWidth) / 2,
       (size.height - boardHeight) / 2,
     );
+    final visibleOrigin = origin + Offset(0, cellSize * _bufferSliverRows);
     final boardRect = origin & Size(boardWidth, boardHeight);
     final radius = Radius.circular(cellSize * 0.16);
 
@@ -925,9 +928,11 @@ class _BoardPainter extends CustomPainter {
     );
 
     final gridPaint = Paint()..color = _gridLine;
+    _drawBufferSliver(canvas, origin, visibleOrigin, cellSize, gridPaint);
+
     for (var y = 0; y < TetrisGame.visibleRows; y += 1) {
       for (var x = 0; x < TetrisGame.width; x += 1) {
-        final rect = _cellRect(origin, cellSize, x, y).deflate(1);
+        final rect = _cellRect(visibleOrigin, cellSize, x, y).deflate(1);
         canvas.drawRRect(RRect.fromRectAndRadius(rect, radius), gridPaint);
       }
     }
@@ -936,7 +941,7 @@ class _BoardPainter extends CustomPainter {
       for (var x = 0; x < TetrisGame.width; x += 1) {
         final type = game.visibleCellAt(x, y);
         if (type != null) {
-          _drawMino(canvas, origin, cellSize, x, y, type);
+          _drawMino(canvas, visibleOrigin, cellSize, x, y, type);
         }
       }
     }
@@ -944,16 +949,64 @@ class _BoardPainter extends CustomPainter {
     for (final cell in game.ghostCells) {
       final y = cell.y - TetrisGame.bufferRows;
       if (y >= 0 && y < TetrisGame.visibleRows) {
-        _drawGhost(canvas, origin, cellSize, cell.x, y, cell.type);
+        _drawGhost(canvas, visibleOrigin, cellSize, cell.x, y, cell.type);
       }
     }
 
     for (final cell in game.activeCells) {
       final y = cell.y - TetrisGame.bufferRows;
       if (y >= 0 && y < TetrisGame.visibleRows) {
-        _drawMino(canvas, origin, cellSize, cell.x, y, cell.type);
+        _drawMino(canvas, visibleOrigin, cellSize, cell.x, y, cell.type);
       }
     }
+  }
+
+  void _drawBufferSliver(
+    Canvas canvas,
+    Offset origin,
+    Offset visibleOrigin,
+    double cellSize,
+    Paint gridPaint,
+  ) {
+    final clip = Rect.fromLTWH(
+      origin.dx,
+      origin.dy,
+      cellSize * TetrisGame.width,
+      cellSize * _bufferSliverRows,
+    );
+    final hiddenOrigin = Offset(origin.dx, visibleOrigin.dy - cellSize);
+    final radius = Radius.circular(cellSize * 0.16);
+
+    canvas.save();
+    canvas.clipRect(clip);
+    for (var x = 0; x < TetrisGame.width; x += 1) {
+      final rect = _cellRect(hiddenOrigin, cellSize, x, 0).deflate(1);
+      canvas.drawRRect(RRect.fromRectAndRadius(rect, radius), gridPaint);
+      final type = game.cellAt(x, TetrisGame.bufferRows - 1);
+      if (type != null) {
+        _drawMino(canvas, hiddenOrigin, cellSize, x, 0, type);
+      }
+    }
+
+    void drawSliverCell(MinoCell cell, void Function() draw) {
+      if (cell.y == TetrisGame.bufferRows - 1) {
+        draw();
+      }
+    }
+
+    for (final cell in game.ghostCells) {
+      drawSliverCell(
+        cell,
+        () => _drawGhost(canvas, hiddenOrigin, cellSize, cell.x, 0, cell.type),
+      );
+    }
+    for (final cell in game.activeCells) {
+      drawSliverCell(
+        cell,
+        () => _drawMino(canvas, hiddenOrigin, cellSize, cell.x, 0, cell.type),
+      );
+    }
+    canvas.restore();
   }
 
   @override
