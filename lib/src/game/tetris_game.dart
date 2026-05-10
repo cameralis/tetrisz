@@ -26,6 +26,38 @@ final class LineClearResult {
   final int points;
 }
 
+final class BoardSnapshot {
+  BoardSnapshot._(List<List<Tetromino?>> board)
+    : _board = List.unmodifiable(
+        board.map((row) => List<Tetromino?>.unmodifiable(row)),
+      );
+
+  final List<List<Tetromino?>> _board;
+
+  Tetromino? cellAt(int x, int y) {
+    if (x < 0 || x >= TetrisGame.width || y < 0 || y >= TetrisGame.totalRows) {
+      return null;
+    }
+    return _board[y][x];
+  }
+
+  Tetromino? visibleCellAt(int x, int visibleY) {
+    return cellAt(x, TetrisGame.bufferRows + visibleY);
+  }
+}
+
+final class LineClearAnimationSnapshot {
+  LineClearAnimationSnapshot({required this.board, required Iterable<int> rows})
+    : rows = List.unmodifiable(rows);
+
+  final BoardSnapshot board;
+  final List<int> rows;
+
+  bool containsVisibleRow(int visibleY) {
+    return rows.contains(TetrisGame.bufferRows + visibleY);
+  }
+}
+
 final class TetrisGame {
   TetrisGame({int? seed, List<Tetromino> scriptedPieces = const []})
     : _random = Random(seed),
@@ -93,6 +125,7 @@ final class TetrisGame {
   int combo = -1;
   bool backToBack = false;
   LineClearResult lastClear = LineClearResult.none;
+  LineClearAnimationSnapshot? lastLineClearSnapshot;
 
   Duration get gravityInterval {
     final index = (level - 1).clamp(0, _gravityFramesByLevel.length - 1);
@@ -176,6 +209,7 @@ final class TetrisGame {
     combo = -1;
     backToBack = false;
     lastClear = LineClearResult.none;
+    lastLineClearSnapshot = null;
     _ensureQueue();
     _spawnNext();
   }
@@ -371,6 +405,13 @@ final class TetrisGame {
     }
     lockCount += 1;
 
+    final filledRows = _filledRows();
+    lastLineClearSnapshot = filledRows.isEmpty
+        ? null
+        : LineClearAnimationSnapshot(
+            board: BoardSnapshot._(_board),
+            rows: filledRows,
+          );
     final cleared = _clearLines();
     final perfectClear = cleared > 0 && _isBoardEmpty;
     _applyScoring(cleared, tSpin: tSpin, perfectClear: perfectClear);
@@ -402,6 +443,16 @@ final class TetrisGame {
       }
     }
     return cleared;
+  }
+
+  List<int> _filledRows() {
+    final rows = <int>[];
+    for (var y = 0; y < totalRows; y += 1) {
+      if (_board[y].every((cell) => cell != null)) {
+        rows.add(y);
+      }
+    }
+    return rows;
   }
 
   void _applyScoring(

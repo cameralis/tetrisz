@@ -18,6 +18,9 @@ const _committingDiagonalDownDrag = Offset(34, 96);
 const _committingDiagonalUpDrag = Offset(34, -96);
 const _snapCommitDuration = Duration(milliseconds: 64);
 const _hardDropAnimationDuration = Duration(milliseconds: 72);
+const _lineClearStepDuration = Duration(milliseconds: 24);
+const _lineClearAnimationDuration = Duration(milliseconds: 240);
+const _lineClearDropDelay = Duration(milliseconds: 24);
 const _snapPreviewFraction = 0.25;
 const _snapCommitFraction = 0.7;
 const _snapBlockedFraction = 0.22;
@@ -74,6 +77,43 @@ Future<void> _finishHardDropAnimation(WidgetTester tester) async {
   );
   await tester.idle();
   await tester.pump();
+}
+
+Future<void> _finishLineClearAnimation(WidgetTester tester) async {
+  await tester.pump(
+    _lineClearAnimationDuration + const Duration(milliseconds: 1),
+  );
+  await tester.idle();
+  await tester.pump(_lineClearDropDelay + const Duration(milliseconds: 1));
+  await tester.idle();
+  await tester.pump();
+}
+
+Set<int> _boardLineClearHiddenColumns(WidgetTester tester) {
+  final boardPaints = tester.widgetList<CustomPaint>(
+    find.descendant(
+      of: find.byKey(const ValueKey('tetris-board')),
+      matching: find.byType(CustomPaint),
+    ),
+  );
+  final boardPaint = boardPaints.singleWhere(
+    (paint) => paint.painter.runtimeType.toString() == '_BoardPainter',
+  );
+  return (boardPaint.painter as dynamic).lineClearHiddenColumns as Set<int>;
+}
+
+LineClearAnimationSnapshot? _boardLineClearSnapshot(WidgetTester tester) {
+  final boardPaints = tester.widgetList<CustomPaint>(
+    find.descendant(
+      of: find.byKey(const ValueKey('tetris-board')),
+      matching: find.byType(CustomPaint),
+    ),
+  );
+  final boardPaint = boardPaints.singleWhere(
+    (paint) => paint.painter.runtimeType.toString() == '_BoardPainter',
+  );
+  return (boardPaint.painter as dynamic).lineClearSnapshot
+      as LineClearAnimationSnapshot?;
 }
 
 double _previewOffsetForDrag(double dragX, double cellWidth) {
@@ -572,6 +612,7 @@ void main() {
     await tester.drag(board, const Offset(0, 96));
     await tester.pump();
     await _finishHardDropAnimation(tester);
+    await _finishLineClearAnimation(tester);
 
     expect(
       soundEffects.playedSfx,
@@ -604,6 +645,7 @@ void main() {
     await tester.drag(board, const Offset(0, 96));
     await tester.pump();
     await _finishHardDropAnimation(tester);
+    await _finishLineClearAnimation(tester);
 
     expect(
       soundEffects.playedSfx,
@@ -612,6 +654,57 @@ void main() {
     expect(soundEffects.playedSfx, isNot(contains(TetrisSfx.clear)));
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'line clear removes cells from the center before the board drops',
+    (tester) async {
+      _usePhoneViewport(tester);
+      final game = TetrisGame(scriptedPieces: [Tetromino.i, Tetromino.o]);
+      final bottom = TetrisGame.visibleRows - 1;
+      _fillVisibleRowExcept(game, bottom, {3, 4, 5, 6});
+      game.setVisibleCell(0, bottom - 1, Tetromino.o);
+
+      await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
+      await tester.pump();
+
+      final board = find.byKey(const ValueKey('tetris-board'));
+      await tester.drag(board, const Offset(0, 96));
+      await tester.pump();
+      await _finishHardDropAnimation(tester);
+
+      final snapshot = _boardLineClearSnapshot(tester)!;
+      expect(_boardLineClearHiddenColumns(tester), isEmpty);
+      expect(game.visibleCellAt(0, bottom), Tetromino.o);
+      expect(game.visibleCellAt(0, bottom - 1), isNull);
+      expect(snapshot.board.visibleCellAt(0, bottom - 1), Tetromino.o);
+      expect(snapshot.board.visibleCellAt(0, bottom), Tetromino.z);
+
+      await tester.pump(
+        _lineClearStepDuration + const Duration(milliseconds: 1),
+      );
+      expect(_boardLineClearHiddenColumns(tester), {4});
+
+      await tester.pump(_lineClearStepDuration);
+      expect(_boardLineClearHiddenColumns(tester), {4, 5});
+
+      await tester.pump(
+        _lineClearAnimationDuration + const Duration(milliseconds: 1),
+      );
+      await tester.idle();
+
+      expect(_boardLineClearSnapshot(tester), isNotNull);
+      expect(_boardLineClearHiddenColumns(tester), hasLength(TetrisGame.width));
+
+      await tester.pump(_lineClearDropDelay + const Duration(milliseconds: 1));
+      await tester.idle();
+      await tester.pump();
+
+      expect(_boardLineClearSnapshot(tester), isNull);
+      expect(_boardLineClearHiddenColumns(tester), isEmpty);
+      expect(game.visibleCellAt(0, bottom), Tetromino.o);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('plays hard lock sound when lock delay expires', (tester) async {
     _usePhoneViewport(tester);

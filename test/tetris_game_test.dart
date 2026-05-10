@@ -63,6 +63,15 @@ void main() {
           List.generate(TetrisGame.width, (x) => game.visibleCellAt(x, bottom)),
           everyElement(isNull),
         );
+        final snapshot = game.lastLineClearSnapshot!;
+        expect(snapshot.rows, [TetrisGame.bufferRows + bottom]);
+        expect(
+          List.generate(
+            TetrisGame.width,
+            (x) => snapshot.board.visibleCellAt(x, bottom),
+          ),
+          everyElement(isNotNull),
+        );
       },
     );
 
