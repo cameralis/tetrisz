@@ -33,6 +33,13 @@ const _sfxVolumePreferenceKey = 'tetris.sfxVolume';
 const _boardAspectRatio =
     TetrisGame.width / (TetrisGame.visibleRows + _bufferSliverRows);
 
+@visibleForTesting
+const tetrisMusicPlaylist = <String>[
+  'assets/audio/korobeiniki.m4a',
+  'assets/audio/music2.m4a',
+  'assets/audio/music3.m4a',
+];
+
 enum TetrisSfx {
   slide('sfx/slide.mp3'),
   rotate('sfx/rotate.mp3'),
@@ -47,6 +54,55 @@ enum TetrisSfx {
   const TetrisSfx(this.assetPath);
 
   final String assetPath;
+}
+
+abstract interface class TetrisMusicPlayer {
+  Stream<void> get onTrackComplete;
+
+  Future<void> playAsset(String assetPath);
+
+  Future<void> resume();
+
+  Future<void> pause();
+
+  Future<void> stop();
+
+  Future<void> setVolume(double volume);
+
+  Future<void> dispose();
+}
+
+final class AssetTetrisMusicPlayer implements TetrisMusicPlayer {
+  AssetTetrisMusicPlayer({AudioPlayer? player})
+    : _player = player ?? AudioPlayer() {
+    _player.audioCache = AudioCache(prefix: '');
+  }
+
+  final AudioPlayer _player;
+
+  @override
+  Stream<void> get onTrackComplete => _player.onPlayerComplete;
+
+  @override
+  Future<void> playAsset(String assetPath) async {
+    await _player.setReleaseMode(ReleaseMode.stop);
+    await _player.play(AssetSource(assetPath));
+  }
+
+  @override
+  Future<void> resume() => _player.resume();
+
+  @override
+  Future<void> pause() => _player.pause();
+
+  @override
+  Future<void> stop() => _player.stop();
+
+  @override
+  Future<void> setVolume(double volume) => _player.setVolume(volume);
+
+  @override
+  Future<void> dispose() => _player.dispose();
 }
 
 abstract interface class TetrisSoundEffects {
@@ -142,11 +198,13 @@ class TetrisApp extends StatelessWidget {
     super.key,
     this.enableAudio = true,
     this.game,
+    this.musicPlayer,
     this.soundEffects,
   });
 
   final bool enableAudio;
   final TetrisGame? game;
+  final TetrisMusicPlayer? musicPlayer;
   final TetrisSoundEffects? soundEffects;
 
   @override
@@ -170,6 +228,7 @@ class TetrisApp extends StatelessWidget {
       home: TetrisGamePage(
         enableAudio: enableAudio,
         game: game,
+        musicPlayer: musicPlayer,
         soundEffects: soundEffects,
       ),
     );
@@ -181,11 +240,13 @@ class TetrisGamePage extends StatefulWidget {
     super.key,
     this.enableAudio = true,
     this.game,
+    this.musicPlayer,
     this.soundEffects,
   });
 
   final bool enableAudio;
   final TetrisGame? game;
+  final TetrisMusicPlayer? musicPlayer;
   final TetrisSoundEffects? soundEffects;
 
   @override
@@ -199,8 +260,10 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   late final AnimationController _snapBackController;
   late final TetrisSoundEffects _soundEffects;
   late final bool _disposeSoundEffects;
+  late final bool _disposeMusicPlayer;
   Future<void>? _volumePreferencesFuture;
-  AudioPlayer? _musicPlayer;
+  TetrisMusicPlayer? _musicPlayer;
+  StreamSubscription<void>? _musicCompleteSubscription;
   Timer? _softDropTimer;
 
   Duration _lastFrameElapsed = Duration.zero;
@@ -215,6 +278,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   bool _horizontalDragLocked = false;
   bool _musicStarted = false;
   bool _volumePreferencesLoaded = false;
+  int _musicTrackIndex = 0;
   double _musicVolume = _defaultMusicVolume;
   double _sfxVolume = _defaultSfxVolume;
 
@@ -249,8 +313,16 @@ class _TetrisGamePageState extends State<TetrisGamePage>
             }
           });
     if (widget.enableAudio) {
-      _musicPlayer = AudioPlayer();
+      _musicPlayer = widget.musicPlayer ?? AssetTetrisMusicPlayer();
+      _disposeMusicPlayer = widget.musicPlayer == null;
+      _musicCompleteSubscription = _musicPlayer!.onTrackComplete.listen((_) {
+        if (mounted && !_game.paused && !_game.gameOver) {
+          unawaited(_playNextMusicTrack());
+        }
+      });
       unawaited(_playMusicAfterVolumePreferencesLoad());
+    } else {
+      _disposeMusicPlayer = false;
     }
   }
 
@@ -260,10 +332,13 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _softDropTimer?.cancel();
     _snapBackController.dispose();
     _ticker.dispose();
+    unawaited(_musicCompleteSubscription?.cancel() ?? Future.value());
     if (_disposeSoundEffects) {
       _soundEffects.dispose();
     }
-    unawaited(_musicPlayer?.dispose() ?? Future.value());
+    if (_disposeMusicPlayer) {
+      unawaited(_musicPlayer?.dispose() ?? Future.value());
+    }
     super.dispose();
   }
 
@@ -352,17 +427,31 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     }
 
     try {
-      await player.setReleaseMode(ReleaseMode.loop);
       await player.setVolume(_musicVolume);
       if (_musicStarted) {
         await player.resume();
       } else {
-        await player.play(AssetSource('audio/korobeiniki.m4a'));
+        await player.playAsset(tetrisMusicPlaylist[_musicTrackIndex]);
         _musicStarted = true;
       }
     } catch (_) {
       // Web and mobile platforms can block audio until a user gesture.
     }
+  }
+
+  Future<void> _playNextMusicTrack() async {
+    _musicTrackIndex = (_musicTrackIndex + 1) % tetrisMusicPlaylist.length;
+    _musicStarted = false;
+    await _playMusic();
+  }
+
+  Future<void> _restartMusicPlaylist() async {
+    _musicTrackIndex = 0;
+    _musicStarted = false;
+    try {
+      await _musicPlayer?.stop();
+    } catch (_) {}
+    await _playMusic();
   }
 
   void _runAction(VoidCallback action) {
@@ -417,9 +506,10 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   }
 
   void _restart() {
-    _runAction(() {
+    setState(() {
       _game.restart();
     });
+    unawaited(_restartMusicPlaylist());
   }
 
   void _togglePause() {

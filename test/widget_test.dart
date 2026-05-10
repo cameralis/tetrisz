@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -117,6 +118,54 @@ final class _RecordingSoundEffects implements TetrisSoundEffects {
   }
 }
 
+final class _RecordingMusicPlayer implements TetrisMusicPlayer {
+  final playedAssets = <String>[];
+  final volumes = <double>[];
+  final _completeController = StreamController<void>.broadcast();
+  var pauseCount = 0;
+  var resumeCount = 0;
+  var stopCount = 0;
+  var disposed = false;
+
+  @override
+  Stream<void> get onTrackComplete => _completeController.stream;
+
+  void completeTrack() {
+    _completeController.add(null);
+  }
+
+  @override
+  Future<void> playAsset(String assetPath) async {
+    playedAssets.add(assetPath);
+  }
+
+  @override
+  Future<void> resume() async {
+    resumeCount += 1;
+  }
+
+  @override
+  Future<void> pause() async {
+    pauseCount += 1;
+  }
+
+  @override
+  Future<void> stop() async {
+    stopCount += 1;
+  }
+
+  @override
+  Future<void> setVolume(double volume) async {
+    volumes.add(volume);
+  }
+
+  @override
+  Future<void> dispose() async {
+    disposed = true;
+    await _completeController.close();
+  }
+}
+
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
@@ -128,6 +177,13 @@ void main() {
       expect(File(sfx.assetPath).existsSync(), isTrue, reason: sfx.assetPath);
       final bytes = await rootBundle.load(sfx.assetPath);
       expect(bytes.lengthInBytes, greaterThan(0), reason: sfx.assetPath);
+    }
+  });
+
+  testWidgets('all music playlist assets are loadable', (tester) async {
+    for (final assetPath in tetrisMusicPlaylist) {
+      final bytes = await rootBundle.load(assetPath);
+      expect(bytes.lengthInBytes, greaterThan(0), reason: assetPath);
     }
   });
 
@@ -345,6 +401,71 @@ void main() {
 
     expect(tester.widget<Slider>(musicSliderFinder).value, 0.2);
     expect(tester.widget<Slider>(sfxSliderFinder).value, 1.25);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('music playlist advances in order and wraps to the first track', (
+    tester,
+  ) async {
+    final musicPlayer = _RecordingMusicPlayer();
+    addTearDown(musicPlayer.dispose);
+
+    await tester.pumpWidget(
+      TetrisApp(enableAudio: true, musicPlayer: musicPlayer),
+    );
+    await _flushPreferenceTasks(tester);
+
+    expect(musicPlayer.playedAssets, [tetrisMusicPlaylist[0]]);
+
+    musicPlayer.completeTrack();
+    await _flushPreferenceTasks(tester);
+    expect(musicPlayer.playedAssets, [
+      tetrisMusicPlaylist[0],
+      tetrisMusicPlaylist[1],
+    ]);
+
+    musicPlayer.completeTrack();
+    await _flushPreferenceTasks(tester);
+    expect(musicPlayer.playedAssets, [
+      tetrisMusicPlaylist[0],
+      tetrisMusicPlaylist[1],
+      tetrisMusicPlaylist[2],
+    ]);
+
+    musicPlayer.completeTrack();
+    await _flushPreferenceTasks(tester);
+    expect(musicPlayer.playedAssets, [
+      tetrisMusicPlaylist[0],
+      tetrisMusicPlaylist[1],
+      tetrisMusicPlaylist[2],
+      tetrisMusicPlaylist[0],
+    ]);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('restart starts the music playlist from the first track', (
+    tester,
+  ) async {
+    _usePhoneViewport(tester);
+    final musicPlayer = _RecordingMusicPlayer();
+    addTearDown(musicPlayer.dispose);
+
+    await tester.pumpWidget(
+      TetrisApp(enableAudio: true, musicPlayer: musicPlayer),
+    );
+    await _flushPreferenceTasks(tester);
+
+    musicPlayer.completeTrack();
+    await _flushPreferenceTasks(tester);
+    expect(musicPlayer.playedAssets.last, tetrisMusicPlaylist[1]);
+
+    await tester.tap(find.byTooltip('Pause'));
+    await tester.pump();
+    await tester.tap(find.byTooltip('Restart'));
+    await _flushPreferenceTasks(tester);
+
+    expect(musicPlayer.stopCount, 1);
+    expect(musicPlayer.playedAssets.last, tetrisMusicPlaylist[0]);
     expect(tester.takeException(), isNull);
   });
 

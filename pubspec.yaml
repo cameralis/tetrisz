@@ -62,6 +62,8 @@ flutter:
 
   assets:
     - assets/audio/korobeiniki.m4a
+    - assets/audio/music2.m4a
+    - assets/audio/music3.m4a
     - sfx/
 
   # An image asset can refer to one or more resolution-specific "variants", see
