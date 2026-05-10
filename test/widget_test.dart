@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -283,6 +284,12 @@ void main() {
       final bytes = await rootBundle.load(assetPath);
       expect(bytes.lengthInBytes, greaterThan(0), reason: assetPath);
     }
+  });
+
+  test('preview outline uses extended HDR color values', () {
+    expect(tetrisPreviewHdrOutlineColor.colorSpace, ui.ColorSpace.extendedSRGB);
+    expect(tetrisPreviewHdrOutlineColor.g, greaterThan(1));
+    expect(tetrisPreviewHdrOutlineColor.b, greaterThan(1));
   });
 
   test('platform app and splash icons use the provided icon', () async {

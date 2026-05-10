@@ -35,6 +35,28 @@ const _lineClearSnapParticleSpeed = 0.26;
 const _lineClearSnapParticlesInRow = TetrisGame.width * 5;
 const _lineClearSnapParticlesInColumn = TetrisGame.visibleRows * 5;
 const _lineClearSnapWarmUpSize = Size(320, 640);
+@visibleForTesting
+const tetrisPreviewHdrOutlineColor = ui.Color.from(
+  alpha: 1,
+  red: 0.18,
+  green: 2.1,
+  blue: 2.8,
+  colorSpace: ui.ColorSpace.extendedSRGB,
+);
+const _previewHdrAuraColor = ui.Color.from(
+  alpha: 0.72,
+  red: 0.04,
+  green: 1.55,
+  blue: 2.4,
+  colorSpace: ui.ColorSpace.extendedSRGB,
+);
+const _previewHdrWhiteCoreColor = ui.Color.from(
+  alpha: 1,
+  red: 1.25,
+  green: 1.5,
+  blue: 1.8,
+  colorSpace: ui.ColorSpace.extendedSRGB,
+);
 const _horizontalIntentFraction = 0.35;
 const _minHorizontalIntentDistance = 20.0;
 const _snapPreviewFraction = 0.25;
@@ -2411,7 +2433,7 @@ class _PiecePreviewPainter extends CustomPainter {
     );
 
     for (final point in points) {
-      _drawMino(canvas, origin, cellSize, point.x, point.y, type);
+      _drawPreviewMino(canvas, origin, cellSize, point.x, point.y, type);
     }
   }
 
@@ -2419,6 +2441,48 @@ class _PiecePreviewPainter extends CustomPainter {
   bool shouldRepaint(covariant _PiecePreviewPainter oldDelegate) {
     return oldDelegate.type != type;
   }
+}
+
+void _drawPreviewMino(
+  Canvas canvas,
+  Offset origin,
+  double cellSize,
+  num x,
+  num y,
+  Tetromino type,
+) {
+  _drawMino(canvas, origin, cellSize, x, y, type);
+
+  final rect = _cellRect(origin, cellSize, x, y).deflate(cellSize * 0.035);
+  final rrect = RRect.fromRectAndRadius(rect, Radius.circular(cellSize * 0.17));
+
+  canvas.drawRRect(
+    rrect,
+    Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = math.max(2.4, cellSize * 0.22)
+      ..strokeJoin = StrokeJoin.round
+      ..blendMode = BlendMode.plus
+      ..color = _previewHdrAuraColor,
+  );
+  canvas.drawRRect(
+    rrect,
+    Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = math.max(1.6, cellSize * 0.11)
+      ..strokeJoin = StrokeJoin.round
+      ..blendMode = BlendMode.plus
+      ..color = tetrisPreviewHdrOutlineColor,
+  );
+  canvas.drawRRect(
+    rrect.deflate(math.max(0.5, cellSize * 0.055)),
+    Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = math.max(0.8, cellSize * 0.035)
+      ..strokeJoin = StrokeJoin.round
+      ..blendMode = BlendMode.plus
+      ..color = _previewHdrWhiteCoreColor,
+  );
 }
 
 Rect _cellRect(Offset origin, double cellSize, num x, num y) {
