@@ -301,9 +301,17 @@ void main() {
 
       expect(outline.colorSpace, ui.ColorSpace.extendedSRGB, reason: '$type');
       expect(channels.last, greaterThan(4), reason: '$type');
-      expect(channels.first, lessThan(0.2), reason: '$type');
-      expect(channels.last - channels.first, greaterThan(3.8), reason: '$type');
+      expect(channels.first, lessThan(0.8), reason: '$type');
+      expect(channels.last - channels.first, greaterThan(3.4), reason: '$type');
     }
+  });
+
+  test('ghost green is bright without being pure radioactive green', () {
+    final outline = tetrisGhostHdrOutlineColorFor(Tetromino.s);
+
+    expect(outline.g, greaterThan(4.5));
+    expect(outline.r, greaterThan(0.4));
+    expect(outline.b, greaterThan(0.5));
   });
 
   test('iOS opts into extended dynamic range rendering', () {

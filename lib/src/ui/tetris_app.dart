@@ -2209,19 +2209,19 @@ void _drawGhost(
     rrect,
     Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = math.max(5.0, cellSize * 0.26)
+      ..strokeWidth = math.max(6.8, cellSize * 0.36)
       ..strokeJoin = StrokeJoin.round
-      ..maskFilter = MaskFilter.blur(BlurStyle.normal, cellSize * 0.16)
-      ..color = outlineColor.withValues(alpha: 0.26),
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, cellSize * 0.28)
+      ..color = outlineColor.withValues(alpha: 0.16),
   );
   canvas.drawRRect(
     rrect,
     Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = math.max(3.2, cellSize * 0.18)
+      ..strokeWidth = math.max(4.8, cellSize * 0.24)
       ..strokeJoin = StrokeJoin.round
-      ..maskFilter = MaskFilter.blur(BlurStyle.normal, cellSize * 0.075)
-      ..color = outlineColor.withValues(alpha: 0.42),
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, cellSize * 0.14)
+      ..color = outlineColor.withValues(alpha: 0.24),
   );
   canvas.drawRRect(
     rrect,
@@ -2261,15 +2261,15 @@ ui.Color tetrisGhostHdrOutlineColorFor(Tetromino type) {
     ),
     Tetromino.j => const ui.Color.from(
       alpha: 1,
-      red: 0.05,
-      green: 0.18,
-      blue: 4.6,
+      red: 0.08,
+      green: 0.42,
+      blue: 5.6,
       colorSpace: ui.ColorSpace.extendedSRGB,
     ),
     Tetromino.l => const ui.Color.from(
       alpha: 1,
-      red: 4.5,
-      green: 0.68,
+      red: 5.45,
+      green: 1.18,
       blue: 0,
       colorSpace: ui.ColorSpace.extendedSRGB,
     ),
@@ -2282,9 +2282,9 @@ ui.Color tetrisGhostHdrOutlineColorFor(Tetromino type) {
     ),
     Tetromino.s => const ui.Color.from(
       alpha: 1,
-      red: 0,
-      green: 4.25,
-      blue: 0.08,
+      red: 0.55,
+      green: 4.65,
+      blue: 0.7,
       colorSpace: ui.ColorSpace.extendedSRGB,
     ),
     Tetromino.z => const ui.Color.from(
@@ -2296,9 +2296,9 @@ ui.Color tetrisGhostHdrOutlineColorFor(Tetromino type) {
     ),
     Tetromino.t => const ui.Color.from(
       alpha: 1,
-      red: 2.9,
-      green: 0,
-      blue: 4.35,
+      red: 4.45,
+      green: 0.03,
+      blue: 5.25,
       colorSpace: ui.ColorSpace.extendedSRGB,
     ),
   };
