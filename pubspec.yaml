@@ -66,6 +66,9 @@ flutter:
     - assets/audio/music3.m4a
     - sfx/
 
+  shaders:
+    - shaders/line_clear_snap.glsl
+
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
 

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
@@ -21,11 +22,16 @@ const _compactTopBarHeight = 54.0;
 const _maxTickDelta = Duration(milliseconds: 250);
 const _snapBackDuration = Duration(milliseconds: 120);
 const _snapCommitDuration = Duration(milliseconds: 64);
-const _lineClearAnimationDuration = Duration(milliseconds: 240);
+const _lineClearAnimationDuration = Duration(milliseconds: 520);
 const _lineClearDropDelay = Duration(milliseconds: 24);
 const _boardImpactDuration = Duration(milliseconds: 1200);
 const _boardImpactDownCells = 0.36;
 const _boardSideImpactCells = 0.18;
+const _lineClearSnapShaderAsset = 'shaders/line_clear_snap.glsl';
+const _lineClearSnapTextureCellSize = 32.0;
+const _lineClearSnapParticleLifetime = 0.72;
+const _lineClearSnapFadeDuration = 0.42;
+const _lineClearSnapParticleSpeed = 0.26;
 const _horizontalIntentFraction = 0.35;
 const _minHorizontalIntentDistance = 20.0;
 const _snapPreviewFraction = 0.25;
@@ -38,28 +44,6 @@ const _musicVolumePreferenceKey = 'tetris.musicVolume';
 const _sfxVolumePreferenceKey = 'tetris.sfxVolume';
 const _boardAspectRatio =
     TetrisGame.width / (TetrisGame.visibleRows + _bufferSliverRows);
-
-final _lineClearColumnOrder = List<int>.unmodifiable(
-  _centerOutColumnOrder(TetrisGame.width),
-);
-
-List<int> _centerOutColumnOrder(int width) {
-  final columns = <int>[];
-  final leftCenter = (width - 1) ~/ 2;
-  final rightCenter = width ~/ 2;
-  for (var offset = 0; columns.length < width; offset += 1) {
-    final left = leftCenter - offset;
-    if (left >= 0) {
-      columns.add(left);
-    }
-
-    final right = rightCenter + offset;
-    if (right < width && right != left) {
-      columns.add(right);
-    }
-  }
-  return columns;
-}
 
 @visibleForTesting
 const tetrisMusicPlaylist = <String>[
@@ -341,18 +325,15 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   bool _volumePreferencesLoaded = false;
   int _musicTrackIndex = 0;
   int _dragWallImpactMask = 0;
-  int _lineClearHiddenColumnCount = 0;
   int _lineClearAnimationSerial = 0;
   double _musicVolume = _defaultMusicVolume;
   double _sfxVolume = _defaultSfxVolume;
   LineClearAnimationSnapshot? _lineClearSnapshot;
+  ui.FragmentProgram? _lineClearSnapProgram;
+  ui.Image? _lineClearSnapImage;
 
   bool get _boardAcceptsInput =>
       !_game.paused && !_game.gameOver && !_lineClearAnimating;
-
-  Set<int> get _lineClearHiddenColumns {
-    return _lineClearColumnOrder.take(_lineClearHiddenColumnCount).toSet();
-  }
 
   @override
   void initState() {
@@ -386,14 +367,8 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _lineClearController =
         AnimationController(vsync: this, duration: _lineClearAnimationDuration)
           ..addListener(() {
-            final nextCount = (_lineClearController.value * TetrisGame.width)
-                .floor()
-                .clamp(0, TetrisGame.width)
-                .toInt();
-            if (mounted && nextCount != _lineClearHiddenColumnCount) {
-              setState(() {
-                _lineClearHiddenColumnCount = nextCount;
-              });
+            if (mounted && _lineClearAnimating) {
+              setState(() {});
             }
           });
     _boardImpactController =
@@ -417,12 +392,14 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     } else {
       _disposeMusicPlayer = false;
     }
+    unawaited(_loadLineClearSnapProgram());
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _softDropTimer?.cancel();
+    _lineClearSnapImage?.dispose();
     _snapBackController.dispose();
     _lineClearController.dispose();
     _boardImpactController.dispose();
@@ -435,6 +412,23 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       unawaited(_musicPlayer?.dispose() ?? Future.value());
     }
     super.dispose();
+  }
+
+  Future<void> _loadLineClearSnapProgram() async {
+    try {
+      final program = await ui.FragmentProgram.fromAsset(
+        _lineClearSnapShaderAsset,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _lineClearSnapProgram = program;
+      });
+    } catch (_) {
+      // Tests and unsupported renderers can run without the shader; the board
+      // still holds the pre-clear snapshot until the animation completes.
+    }
   }
 
   @override
@@ -603,12 +597,72 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _lineClearController.stop();
     final serial = _lineClearAnimationSerial + 1;
     _lineClearAnimationSerial = serial;
+    _setLineClearSnapImage(null);
     setState(() {
       _lineClearSnapshot = snapshot;
-      _lineClearHiddenColumnCount = 0;
       _lineClearAnimating = true;
     });
+    unawaited(_prepareLineClearSnapImage(snapshot, serial));
     unawaited(_runLineClearAnimation(serial));
+  }
+
+  Future<void> _prepareLineClearSnapImage(
+    LineClearAnimationSnapshot snapshot,
+    int serial,
+  ) async {
+    final image = await _renderLineClearSnapImage(snapshot);
+    if (!mounted || serial != _lineClearAnimationSerial) {
+      image.dispose();
+      return;
+    }
+
+    setState(() {
+      _setLineClearSnapImage(image);
+    });
+  }
+
+  Future<ui.Image> _renderLineClearSnapImage(
+    LineClearAnimationSnapshot snapshot,
+  ) async {
+    final width = (TetrisGame.width * _lineClearSnapTextureCellSize).ceil();
+    final height = (TetrisGame.visibleRows * _lineClearSnapTextureCellSize)
+        .ceil();
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(
+      recorder,
+      Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
+    );
+
+    for (final row in snapshot.rows) {
+      final visibleY = row - TetrisGame.bufferRows;
+      if (visibleY < 0 || visibleY >= TetrisGame.visibleRows) {
+        continue;
+      }
+      for (var x = 0; x < TetrisGame.width; x += 1) {
+        final type = snapshot.board.visibleCellAt(x, visibleY);
+        if (type != null) {
+          _drawMino(
+            canvas,
+            Offset.zero,
+            _lineClearSnapTextureCellSize,
+            x,
+            visibleY,
+            type,
+          );
+        }
+      }
+    }
+
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(width, height);
+    picture.dispose();
+    return image;
+  }
+
+  void _setLineClearSnapImage(ui.Image? image) {
+    final previous = _lineClearSnapImage;
+    _lineClearSnapImage = image;
+    previous?.dispose();
   }
 
   Future<void> _runLineClearAnimation(int serial) async {
@@ -622,7 +676,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     }
 
     setState(() {
-      _lineClearHiddenColumnCount = TetrisGame.width;
+      _lineClearController.value = 1;
     });
     await Future<void>.delayed(_lineClearDropDelay);
     if (!mounted || serial != _lineClearAnimationSerial) {
@@ -631,8 +685,8 @@ class _TetrisGamePageState extends State<TetrisGamePage>
 
     setState(() {
       _lineClearSnapshot = null;
-      _lineClearHiddenColumnCount = 0;
       _lineClearAnimating = false;
+      _setLineClearSnapImage(null);
     });
   }
 
@@ -669,10 +723,10 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _lineClearController.stop();
     _boardImpactController.stop();
     _lineClearAnimationSerial += 1;
+    _setLineClearSnapImage(null);
     setState(() {
       _lineClearAnimating = false;
       _lineClearSnapshot = null;
-      _lineClearHiddenColumnCount = 0;
       _dragWallImpactMask = 0;
       _boardImpactOffsetCells = Offset.zero;
       _game.restart();
@@ -1262,7 +1316,9 @@ class _TetrisGamePageState extends State<TetrisGamePage>
                         activeHorizontalOffset: _snapVisualOffsetCells,
                         boardImpactOffset: _boardImpactOffsetCells,
                         lineClearSnapshot: _lineClearSnapshot,
-                        lineClearHiddenColumns: _lineClearHiddenColumns,
+                        lineClearProgress: _lineClearController.value,
+                        lineClearSnapProgram: _lineClearSnapProgram,
+                        lineClearSnapImage: _lineClearSnapImage,
                       ),
                       size: Size.infinite,
                     ),
@@ -1999,14 +2055,18 @@ class _BoardPainter extends CustomPainter {
     required this.activeHorizontalOffset,
     required this.boardImpactOffset,
     required this.lineClearSnapshot,
-    required this.lineClearHiddenColumns,
+    required this.lineClearProgress,
+    required this.lineClearSnapProgram,
+    required this.lineClearSnapImage,
   });
 
   final TetrisGame game;
   final double activeHorizontalOffset;
   final Offset boardImpactOffset;
   final LineClearAnimationSnapshot? lineClearSnapshot;
-  final Set<int> lineClearHiddenColumns;
+  final double lineClearProgress;
+  final ui.FragmentProgram? lineClearSnapProgram;
+  final ui.Image? lineClearSnapImage;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -2048,11 +2108,12 @@ class _BoardPainter extends CustomPainter {
     for (var y = 0; y < TetrisGame.visibleRows; y += 1) {
       for (var x = 0; x < TetrisGame.width; x += 1) {
         final type = _visibleCellAt(x, y);
-        if (type != null && !_isLineClearHiddenCell(x, y)) {
+        if (type != null && !_isLineClearCell(y)) {
           _drawMino(canvas, visibleOrigin, cellSize, x, y, type);
         }
       }
     }
+    _drawLineClearSnapEffect(canvas, visibleOrigin, cellSize);
 
     if (lineClearSnapshot == null) {
       for (final cell in game.ghostCells) {
@@ -2168,11 +2229,58 @@ class _BoardPainter extends CustomPainter {
     return game.visibleCellAt(x, y);
   }
 
-  bool _isLineClearHiddenCell(int x, int visibleY) {
+  bool _isLineClearCell(int visibleY) {
     final snapshot = lineClearSnapshot;
-    return snapshot != null &&
-        snapshot.containsVisibleRow(visibleY) &&
-        lineClearHiddenColumns.contains(x);
+    return snapshot != null && snapshot.containsVisibleRow(visibleY);
+  }
+
+  void _drawLineClearSnapEffect(
+    Canvas canvas,
+    Offset visibleOrigin,
+    double cellSize,
+  ) {
+    final snapshot = lineClearSnapshot;
+    if (snapshot == null) {
+      return;
+    }
+
+    final shaderImage = lineClearSnapImage;
+    final shaderProgram = lineClearSnapProgram;
+    if (shaderImage == null || shaderProgram == null) {
+      for (final row in snapshot.rows) {
+        final visibleY = row - TetrisGame.bufferRows;
+        if (visibleY < 0 || visibleY >= TetrisGame.visibleRows) {
+          continue;
+        }
+        for (var x = 0; x < TetrisGame.width; x += 1) {
+          final type = snapshot.board.visibleCellAt(x, visibleY);
+          if (type != null) {
+            _drawMino(canvas, visibleOrigin, cellSize, x, visibleY, type);
+          }
+        }
+      }
+      return;
+    }
+
+    final shader = shaderProgram.fragmentShader();
+    shader.setFloat(0, lineClearProgress.clamp(0.0, 1.0).toDouble());
+    shader.setFloat(1, _lineClearSnapParticleLifetime);
+    shader.setFloat(2, _lineClearSnapFadeDuration);
+    shader.setFloat(3, (TetrisGame.width * 5).toDouble());
+    shader.setFloat(4, (TetrisGame.visibleRows * 5).toDouble());
+    shader.setFloat(5, _lineClearSnapParticleSpeed);
+    shader.setFloat(6, cellSize * TetrisGame.width);
+    shader.setFloat(7, cellSize * TetrisGame.visibleRows);
+    shader.setImageSampler(0, shaderImage);
+
+    final visibleSize = Size(
+      cellSize * TetrisGame.width,
+      cellSize * TetrisGame.visibleRows,
+    );
+    canvas.save();
+    canvas.translate(visibleOrigin.dx, visibleOrigin.dy);
+    canvas.drawRect(Offset.zero & visibleSize, Paint()..shader = shader);
+    canvas.restore();
   }
 
   @override

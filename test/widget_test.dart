@@ -17,8 +17,7 @@ const _partialDiagonalDownDrag = Offset(24, 96);
 const _committingDiagonalDownDrag = Offset(34, 96);
 const _committingDiagonalUpDrag = Offset(34, -96);
 const _snapCommitDuration = Duration(milliseconds: 64);
-const _lineClearStepDuration = Duration(milliseconds: 24);
-const _lineClearAnimationDuration = Duration(milliseconds: 240);
+const _lineClearAnimationDuration = Duration(milliseconds: 520);
 const _lineClearDropDelay = Duration(milliseconds: 24);
 const _snapPreviewFraction = 0.25;
 const _snapCommitFraction = 0.7;
@@ -80,7 +79,7 @@ Future<void> _finishLineClearAnimation(WidgetTester tester) async {
   await tester.pump();
 }
 
-Set<int> _boardLineClearHiddenColumns(WidgetTester tester) {
+double _boardLineClearProgress(WidgetTester tester) {
   final boardPaints = tester.widgetList<CustomPaint>(
     find.descendant(
       of: find.byKey(const ValueKey('tetris-board')),
@@ -90,7 +89,20 @@ Set<int> _boardLineClearHiddenColumns(WidgetTester tester) {
   final boardPaint = boardPaints.singleWhere(
     (paint) => paint.painter.runtimeType.toString() == '_BoardPainter',
   );
-  return (boardPaint.painter as dynamic).lineClearHiddenColumns as Set<int>;
+  return (boardPaint.painter as dynamic).lineClearProgress as double;
+}
+
+Object? _boardLineClearSnapImage(WidgetTester tester) {
+  final boardPaints = tester.widgetList<CustomPaint>(
+    find.descendant(
+      of: find.byKey(const ValueKey('tetris-board')),
+      matching: find.byType(CustomPaint),
+    ),
+  );
+  final boardPaint = boardPaints.singleWhere(
+    (paint) => paint.painter.runtimeType.toString() == '_BoardPainter',
+  );
+  return (boardPaint.painter as dynamic).lineClearSnapImage as Object?;
 }
 
 LineClearAnimationSnapshot? _boardLineClearSnapshot(WidgetTester tester) {
@@ -722,55 +734,55 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets(
-    'line clear removes cells from the center before the board drops',
-    (tester) async {
-      _usePhoneViewport(tester);
-      final game = TetrisGame(scriptedPieces: [Tetromino.i, Tetromino.o]);
-      final bottom = TetrisGame.visibleRows - 1;
-      _fillVisibleRowExcept(game, bottom, {3, 4, 5, 6});
-      game.setVisibleCell(0, bottom - 1, Tetromino.o);
+  testWidgets('line clear snaps cleared cells away before the board drops', (
+    tester,
+  ) async {
+    _usePhoneViewport(tester);
+    final game = TetrisGame(scriptedPieces: [Tetromino.i, Tetromino.o]);
+    final bottom = TetrisGame.visibleRows - 1;
+    _fillVisibleRowExcept(game, bottom, {3, 4, 5, 6});
+    game.setVisibleCell(0, bottom - 1, Tetromino.o);
 
-      await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
-      await tester.pump();
+    await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
+    await tester.pump();
 
-      final board = find.byKey(const ValueKey('tetris-board'));
-      await tester.drag(board, const Offset(0, 96));
-      await tester.pump();
+    final board = find.byKey(const ValueKey('tetris-board'));
+    await tester.drag(board, const Offset(0, 96));
+    await tester.pump();
+    await tester.idle();
+    await tester.pump();
 
-      final snapshot = _boardLineClearSnapshot(tester)!;
-      expect(_boardLineClearHiddenColumns(tester), isEmpty);
-      expect(game.visibleCellAt(0, bottom), Tetromino.o);
-      expect(game.visibleCellAt(0, bottom - 1), isNull);
-      expect(snapshot.board.visibleCellAt(0, bottom - 1), Tetromino.o);
-      expect(snapshot.board.visibleCellAt(0, bottom), Tetromino.z);
+    final snapshot = _boardLineClearSnapshot(tester)!;
+    expect(_boardLineClearProgress(tester), 0);
+    expect(_boardLineClearSnapImage(tester), isNotNull);
+    expect(game.visibleCellAt(0, bottom), Tetromino.o);
+    expect(game.visibleCellAt(0, bottom - 1), isNull);
+    expect(snapshot.board.visibleCellAt(0, bottom - 1), Tetromino.o);
+    expect(snapshot.board.visibleCellAt(0, bottom), Tetromino.z);
 
-      await tester.pump(
-        _lineClearStepDuration + const Duration(milliseconds: 1),
-      );
-      expect(_boardLineClearHiddenColumns(tester), {4});
+    await tester.pump(_lineClearAnimationDuration ~/ 2);
+    expect(_boardLineClearSnapshot(tester), isNotNull);
+    expect(_boardLineClearProgress(tester), greaterThan(0));
+    expect(_boardLineClearProgress(tester), lessThan(1));
+    expect(_boardLineClearSnapImage(tester), isNotNull);
 
-      await tester.pump(_lineClearStepDuration);
-      expect(_boardLineClearHiddenColumns(tester), {4, 5});
+    await tester.pump(
+      _lineClearAnimationDuration ~/ 2 + const Duration(milliseconds: 1),
+    );
+    await tester.idle();
 
-      await tester.pump(
-        _lineClearAnimationDuration + const Duration(milliseconds: 1),
-      );
-      await tester.idle();
+    expect(_boardLineClearSnapshot(tester), isNotNull);
+    expect(_boardLineClearProgress(tester), 1);
 
-      expect(_boardLineClearSnapshot(tester), isNotNull);
-      expect(_boardLineClearHiddenColumns(tester), hasLength(TetrisGame.width));
+    await tester.pump(_lineClearDropDelay + const Duration(milliseconds: 1));
+    await tester.idle();
+    await tester.pump();
 
-      await tester.pump(_lineClearDropDelay + const Duration(milliseconds: 1));
-      await tester.idle();
-      await tester.pump();
-
-      expect(_boardLineClearSnapshot(tester), isNull);
-      expect(_boardLineClearHiddenColumns(tester), isEmpty);
-      expect(game.visibleCellAt(0, bottom), Tetromino.o);
-      expect(tester.takeException(), isNull);
-    },
-  );
+    expect(_boardLineClearSnapshot(tester), isNull);
+    expect(_boardLineClearSnapImage(tester), isNull);
+    expect(game.visibleCellAt(0, bottom), Tetromino.o);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('plays hard lock sound when lock delay expires', (tester) async {
     _usePhoneViewport(tester);
