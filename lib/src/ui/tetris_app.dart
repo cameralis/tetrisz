@@ -24,6 +24,9 @@ const _minHorizontalIntentDistance = 20.0;
 const _snapPreviewFraction = 0.25;
 const _snapCommitFraction = 0.7;
 const _snapBlockedFraction = 0.22;
+const _defaultMusicVolume = 0.3;
+const _defaultSfxVolume = 2.0;
+const _maxSfxVolume = 2.0;
 const _boardAspectRatio =
     TetrisGame.width / (TetrisGame.visibleRows + _bufferSliverRows);
 
@@ -44,7 +47,7 @@ enum TetrisSfx {
 }
 
 abstract interface class TetrisSoundEffects {
-  void play(TetrisSfx sfx);
+  void play(TetrisSfx sfx, {double volume = 1.0});
 
   void dispose();
 }
@@ -53,17 +56,16 @@ final class NoopTetrisSoundEffects implements TetrisSoundEffects {
   const NoopTetrisSoundEffects();
 
   @override
-  void play(TetrisSfx sfx) {}
+  void play(TetrisSfx sfx, {double volume = 1.0}) {}
 
   @override
   void dispose() {}
 }
 
 final class AssetTetrisSoundEffects implements TetrisSoundEffects {
-  AssetTetrisSoundEffects({this.volume = 1.0, AudioCache? audioCache})
+  AssetTetrisSoundEffects({AudioCache? audioCache})
     : _audioCache = audioCache ?? AudioCache(prefix: '');
 
-  final double volume;
   final AudioCache _audioCache;
   final Map<TetrisSfx, Future<AudioPool>> _pools = {};
 
@@ -71,14 +73,26 @@ final class AssetTetrisSoundEffects implements TetrisSoundEffects {
   String get assetPrefix => _audioCache.prefix;
 
   @override
-  void play(TetrisSfx sfx) {
-    unawaited(_play(sfx));
+  void play(TetrisSfx sfx, {double volume = 1.0}) {
+    unawaited(_play(sfx, volume));
   }
 
-  Future<void> _play(TetrisSfx sfx) async {
+  Future<void> _play(TetrisSfx sfx, double volume) async {
+    final gain = volume.clamp(0.0, _maxSfxVolume).toDouble();
+    if (gain <= 0) {
+      return;
+    }
+
     try {
       final pool = await _poolFor(sfx);
-      await pool.start(volume: volume);
+      var remainingGain = gain;
+      final starts = <Future<StopFunction>>[];
+      while (remainingGain > 0) {
+        final playerVolume = math.min(1.0, remainingGain).toDouble();
+        starts.add(pool.start(volume: playerVolume));
+        remainingGain -= playerVolume;
+      }
+      await Future.wait(starts);
     } catch (_) {}
   }
 
@@ -88,7 +102,7 @@ final class AssetTetrisSoundEffects implements TetrisSoundEffects {
       () => AudioPool.createFromAsset(
         path: sfx.assetPath,
         audioCache: _audioCache,
-        maxPlayers: 4,
+        maxPlayers: 8,
       ),
     );
   }
@@ -201,8 +215,11 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   double _snapVisualOffsetCells = 0;
   Animation<double> _snapBackAnimation = const AlwaysStoppedAnimation(0);
   bool _horizontalDragLocked = false;
-  bool _musicEnabled = true;
   bool _musicStarted = false;
+  double _musicVolume = _defaultMusicVolume;
+  double _sfxVolume = _defaultSfxVolume;
+
+  bool get _boardAcceptsInput => !_game.paused && !_game.gameOver;
 
   @override
   void initState() {
@@ -253,7 +270,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      if (_musicEnabled && !_game.paused && !_game.gameOver) {
+      if (_musicVolume > 0 && !_game.paused && !_game.gameOver) {
         unawaited(_playMusic());
       }
     } else {
@@ -280,7 +297,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   }
 
   Future<void> _playMusic() async {
-    if (!widget.enableAudio || !_musicEnabled) {
+    if (!widget.enableAudio || _musicVolume <= 0) {
       return;
     }
 
@@ -291,7 +308,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
 
     try {
       await player.setReleaseMode(ReleaseMode.loop);
-      await player.setVolume(0.42);
+      await player.setVolume(_musicVolume);
       if (_musicStarted) {
         await player.resume();
       } else {
@@ -348,10 +365,10 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   }
 
   void _playSfx(TetrisSfx sfx) {
-    if (!_musicEnabled) {
+    if (_sfxVolume <= 0) {
       return;
     }
-    _soundEffects.play(sfx);
+    _soundEffects.play(sfx, volume: _sfxVolume);
   }
 
   void _restart() {
@@ -369,15 +386,50 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     }
   }
 
-  void _toggleMusic() {
+  void _setMusicVolume(double volume) {
+    final nextVolume = volume.clamp(0.0, 1.0).toDouble();
     setState(() {
-      _musicEnabled = !_musicEnabled;
+      _musicVolume = nextVolume;
     });
-    if (_musicEnabled) {
-      unawaited(_playMusic());
-    } else {
-      unawaited(_musicPlayer?.pause() ?? Future.value());
+    unawaited(_applyMusicVolume());
+  }
+
+  Future<void> _applyMusicVolume() async {
+    final player = _musicPlayer;
+    if (!widget.enableAudio || player == null) {
+      return;
     }
+
+    try {
+      await player.setVolume(_musicVolume);
+      if (_musicVolume <= 0) {
+        await player.pause();
+      } else if (!_game.paused && !_game.gameOver) {
+        await _playMusic();
+      }
+    } catch (_) {}
+  }
+
+  void _setSfxVolume(double volume) {
+    setState(() {
+      _sfxVolume = volume.clamp(0.0, _maxSfxVolume).toDouble();
+    });
+  }
+
+  void _handlePointerDown(PointerDownEvent event) {
+    if (!_boardAcceptsInput) {
+      return;
+    }
+    _dragPointer = event.pointer;
+    _snapBackController.stop();
+    _dragX = 0;
+    _dragY = 0;
+    _snapDragX = 0;
+    _snapPreviewOffsetCells = 0;
+    _snapPulseOffsetCells = 0;
+    _snapVisualOffsetCells = 0;
+    _horizontalDragLocked = false;
+    unawaited(_playMusic());
   }
 
   void _startSoftDrop() {
@@ -427,19 +479,6 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       successSfx: TetrisSfx.counterRotate,
       didSucceed: (rotated, _) => rotated,
     );
-  }
-
-  void _handlePointerDown(PointerDownEvent event) {
-    _dragPointer = event.pointer;
-    _snapBackController.stop();
-    _dragX = 0;
-    _dragY = 0;
-    _snapDragX = 0;
-    _snapPreviewOffsetCells = 0;
-    _snapPulseOffsetCells = 0;
-    _snapVisualOffsetCells = 0;
-    _horizontalDragLocked = false;
-    unawaited(_playMusic());
   }
 
   void _handlePointerMove(PointerMoveEvent event, double cellSize) {
@@ -658,9 +697,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
                   right: 12,
                   child: _TopControls(
                     paused: _game.paused,
-                    musicEnabled: _musicEnabled,
                     onPause: _togglePause,
-                    onMusic: _toggleMusic,
                   ),
                 ),
               ],
@@ -717,9 +754,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
               level: _game.level,
               lines: _game.lines,
               paused: _game.paused,
-              musicEnabled: _musicEnabled,
               onPause: _togglePause,
-              onMusic: _toggleMusic,
             ),
           ),
           Expanded(child: Center(child: _buildBoard(boardWidth, boardHeight))),
@@ -784,6 +819,9 @@ class _TetrisGamePageState extends State<TetrisGamePage>
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTapUp: (details) {
+                if (!_boardAcceptsInput) {
+                  return;
+                }
                 if (details.localPosition.dx > constraints.maxWidth / 2) {
                   _rotateClockwise();
                 } else {
@@ -791,7 +829,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
                 }
               },
               onLongPressStart: (_) {
-                if (!_horizontalDragLocked) {
+                if (_boardAcceptsInput && !_horizontalDragLocked) {
                   _startSoftDrop();
                 }
               },
@@ -812,6 +850,10 @@ class _TetrisGamePageState extends State<TetrisGamePage>
                     _GameOverlay(
                       gameOver: _game.gameOver,
                       score: _game.score,
+                      musicVolume: _musicVolume,
+                      sfxVolume: _sfxVolume,
+                      onMusicVolumeChanged: _setMusicVolume,
+                      onSfxVolumeChanged: _setSfxVolume,
                       onRestart: _restart,
                       onResume: _togglePause,
                     ),
@@ -833,9 +875,7 @@ class _CompactTopBar extends StatelessWidget {
     required this.level,
     required this.lines,
     required this.paused,
-    required this.musicEnabled,
     required this.onPause,
-    required this.onMusic,
   });
 
   final Tetromino? holdPiece;
@@ -844,9 +884,7 @@ class _CompactTopBar extends StatelessWidget {
   final int level;
   final int lines;
   final bool paused;
-  final bool musicEnabled;
   final VoidCallback onPause;
-  final VoidCallback onMusic;
 
   @override
   Widget build(BuildContext context) {
@@ -877,13 +915,7 @@ class _CompactTopBar extends StatelessWidget {
             const SizedBox(width: 8),
             _TopPieceSlot(title: 'NEXT', piece: nextPiece),
             const SizedBox(width: 8),
-            _TopControls(
-              paused: paused,
-              musicEnabled: musicEnabled,
-              framed: false,
-              onPause: onPause,
-              onMusic: onMusic,
-            ),
+            _TopControls(paused: paused, framed: false, onPause: onPause),
           ],
         ),
       ),
@@ -973,16 +1005,12 @@ class _CompactMetric extends StatelessWidget {
 class _TopControls extends StatelessWidget {
   const _TopControls({
     required this.paused,
-    required this.musicEnabled,
     required this.onPause,
-    required this.onMusic,
     this.framed = true,
   });
 
   final bool paused;
-  final bool musicEnabled;
   final VoidCallback onPause;
-  final VoidCallback onMusic;
   final bool framed;
 
   @override
@@ -995,15 +1023,6 @@ class _TopControls extends StatelessWidget {
           icon: paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
           size: framed ? 44 : 42,
           onPressed: onPause,
-        ),
-        const SizedBox(width: 8),
-        _ControlButton(
-          tooltip: musicEnabled ? 'Mute' : 'Music',
-          icon: musicEnabled
-              ? Icons.volume_up_rounded
-              : Icons.volume_off_rounded,
-          size: framed ? 44 : 42,
-          onPressed: onMusic,
         ),
       ],
     );
@@ -1260,12 +1279,20 @@ class _GameOverlay extends StatelessWidget {
   const _GameOverlay({
     required this.gameOver,
     required this.score,
+    required this.musicVolume,
+    required this.sfxVolume,
+    required this.onMusicVolumeChanged,
+    required this.onSfxVolumeChanged,
     required this.onRestart,
     required this.onResume,
   });
 
   final bool gameOver;
   final int score;
+  final double musicVolume;
+  final double sfxVolume;
+  final ValueChanged<double> onMusicVolumeChanged;
+  final ValueChanged<double> onSfxVolumeChanged;
   final VoidCallback onRestart;
   final VoidCallback onResume;
 
@@ -1300,6 +1327,18 @@ class _GameOverlay extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 _Metric(label: 'SCORE', value: score.toString()),
+                if (!gameOver) ...[
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: 250,
+                    child: _VolumeControls(
+                      musicVolume: musicVolume,
+                      sfxVolume: sfxVolume,
+                      onMusicVolumeChanged: onMusicVolumeChanged,
+                      onSfxVolumeChanged: onSfxVolumeChanged,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 14),
                 Row(
                   mainAxisSize: MainAxisSize.min,
@@ -1324,6 +1363,119 @@ class _GameOverlay extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _VolumeControls extends StatelessWidget {
+  const _VolumeControls({
+    required this.musicVolume,
+    required this.sfxVolume,
+    required this.onMusicVolumeChanged,
+    required this.onSfxVolumeChanged,
+  });
+
+  final double musicVolume;
+  final double sfxVolume;
+  final ValueChanged<double> onMusicVolumeChanged;
+  final ValueChanged<double> onSfxVolumeChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _VolumeSlider(
+          key: const ValueKey('music-volume-row'),
+          label: 'MUSIC',
+          icon: Icons.music_note_rounded,
+          value: musicVolume,
+          max: 1,
+          sliderKey: const ValueKey('music-volume-slider'),
+          onChanged: onMusicVolumeChanged,
+        ),
+        const SizedBox(height: 10),
+        _VolumeSlider(
+          key: const ValueKey('sfx-volume-row'),
+          label: 'SFX',
+          icon: Icons.graphic_eq_rounded,
+          value: sfxVolume,
+          max: _maxSfxVolume,
+          sliderKey: const ValueKey('sfx-volume-slider'),
+          onChanged: onSfxVolumeChanged,
+        ),
+      ],
+    );
+  }
+}
+
+class _VolumeSlider extends StatelessWidget {
+  const _VolumeSlider({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.value,
+    required this.max,
+    required this.sliderKey,
+    required this.onChanged,
+  });
+
+  final String label;
+  final IconData icon;
+  final double value;
+  final double max;
+  final Key sliderKey;
+  final ValueChanged<double> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final percent = (value * 100).round();
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Icon(icon, size: 16, color: _mutedText),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(
+                  color: _mutedText,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+            Text(
+              '$percent%',
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
+          ],
+        ),
+        SliderTheme(
+          data: SliderTheme.of(context).copyWith(
+            trackHeight: 3,
+            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+            overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+          ),
+          child: Slider(
+            key: sliderKey,
+            value: value,
+            min: 0,
+            max: max,
+            divisions: (max * 20).round(),
+            semanticFormatterCallback: (sliderValue) =>
+                '${(sliderValue * 100).round()}%',
+            onChanged: onChanged,
+          ),
+        ),
+      ],
     );
   }
 }

@@ -93,12 +93,14 @@ void _fillVisibleRowExcept(
 }
 
 final class _RecordingSoundEffects implements TetrisSoundEffects {
-  final played = <TetrisSfx>[];
+  final played = <({TetrisSfx sfx, double volume})>[];
   var disposed = false;
 
+  List<TetrisSfx> get playedSfx => played.map((event) => event.sfx).toList();
+
   @override
-  void play(TetrisSfx sfx) {
-    played.add(sfx);
+  void play(TetrisSfx sfx, {double volume = 1.0}) {
+    played.add((sfx: sfx, volume: volume));
   }
 
   @override
@@ -140,12 +142,11 @@ void main() {
     final boardRect = tester.getRect(board);
     final topBarRect = tester.getRect(topBar);
     final pauseRect = tester.getRect(find.byTooltip('Pause'));
-    final muteRect = tester.getRect(find.byTooltip('Mute'));
 
     expect(find.text('HOLD'), findsOneWidget);
     expect(find.text('NEXT'), findsOneWidget);
     expect(find.byTooltip('Pause'), findsOneWidget);
-    expect(find.byTooltip('Mute'), findsOneWidget);
+    expect(find.byTooltip('Mute'), findsNothing);
     expect(find.byTooltip('Rotate clockwise'), findsNothing);
     expect(find.byTooltip('Rotate counter-clockwise'), findsNothing);
     expect(find.byTooltip('Hard drop'), findsNothing);
@@ -157,7 +158,6 @@ void main() {
     expect(boardRect.bottom, lessThanOrEqualTo(844));
     expect(topBarRect.bottom, lessThanOrEqualTo(boardRect.top));
     expect(pauseRect.bottom, lessThanOrEqualTo(boardRect.top));
-    expect(muteRect.bottom, lessThanOrEqualTo(boardRect.top));
 
     await tester.drag(board, const Offset(0, -160));
     await tester.pump();
@@ -235,9 +235,73 @@ void main() {
     await tester.tapAt(tester.getCenter(board) - const Offset(60, 0));
     await tester.pump();
 
-    expect(soundEffects.played, contains(TetrisSfx.slide));
-    expect(soundEffects.played, contains(TetrisSfx.rotate));
-    expect(soundEffects.played, contains(TetrisSfx.counterRotate));
+    expect(soundEffects.playedSfx, contains(TetrisSfx.slide));
+    expect(soundEffects.playedSfx, contains(TetrisSfx.rotate));
+    expect(soundEffects.playedSfx, contains(TetrisSfx.counterRotate));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('pause menu controls default and changed sound volumes', (
+    tester,
+  ) async {
+    _usePhoneViewport(tester);
+    final game = _visiblePieceGame(Tetromino.t);
+    final soundEffects = _RecordingSoundEffects();
+
+    await tester.pumpWidget(
+      TetrisApp(enableAudio: false, game: game, soundEffects: soundEffects),
+    );
+    await tester.pump();
+
+    final board = find.byKey(const ValueKey('tetris-board'));
+    final gesture = await tester.startGesture(tester.getCenter(board));
+    await gesture.moveBy(_committingSnapDrag);
+    await tester.pump();
+    await gesture.up();
+    await tester.pump();
+
+    final defaultSlide = soundEffects.played.lastWhere(
+      (event) => event.sfx == TetrisSfx.slide,
+    );
+    expect(defaultSlide.volume, 2.0);
+
+    await tester.tap(find.byTooltip('Pause'));
+    await tester.pump();
+
+    final musicSliderFinder = find.byKey(const ValueKey('music-volume-slider'));
+    final sfxSliderFinder = find.byKey(const ValueKey('sfx-volume-slider'));
+    expect(musicSliderFinder, findsOneWidget);
+    expect(sfxSliderFinder, findsOneWidget);
+    expect(find.byTooltip('Mute'), findsNothing);
+    await expectLater(
+      find.byType(Scaffold),
+      matchesGoldenFile('goldens/pause_menu_volume_settings.png'),
+    );
+
+    final musicSlider = tester.widget<Slider>(musicSliderFinder);
+    expect(musicSlider.value, 0.3);
+    expect(musicSlider.max, 1);
+    musicSlider.onChanged!(0.2);
+    await tester.pump();
+    expect(tester.widget<Slider>(musicSliderFinder).value, 0.2);
+
+    final sfxSlider = tester.widget<Slider>(sfxSliderFinder);
+    expect(sfxSlider.value, 2.0);
+    expect(sfxSlider.max, 2.0);
+    sfxSlider.onChanged!(1.25);
+    await tester.pump();
+    expect(tester.widget<Slider>(sfxSliderFinder).value, 1.25);
+
+    await tester.tap(find.byTooltip('Resume').last);
+    await tester.pump();
+
+    await tester.tapAt(tester.getCenter(board) + const Offset(60, 0));
+    await tester.pump();
+
+    final changedRotate = soundEffects.played.lastWhere(
+      (event) => event.sfx == TetrisSfx.rotate,
+    );
+    expect(changedRotate.volume, 1.25);
     expect(tester.takeException(), isNull);
   });
 
@@ -257,7 +321,7 @@ void main() {
     await gesture.up();
     await tester.pump();
 
-    expect(soundEffects.played, contains(TetrisSfx.softDrop));
+    expect(soundEffects.playedSfx, contains(TetrisSfx.softDrop));
     expect(tester.takeException(), isNull);
   });
 
@@ -278,10 +342,10 @@ void main() {
     await tester.pump();
 
     expect(
-      soundEffects.played,
+      soundEffects.playedSfx,
       containsAll([TetrisSfx.hardDrop, TetrisSfx.clear]),
     );
-    expect(soundEffects.played, isNot(contains(TetrisSfx.hardLock)));
+    expect(soundEffects.playedSfx, isNot(contains(TetrisSfx.hardLock)));
     expect(tester.takeException(), isNull);
   });
 
@@ -309,10 +373,10 @@ void main() {
     await tester.pump();
 
     expect(
-      soundEffects.played,
+      soundEffects.playedSfx,
       containsAll([TetrisSfx.hardDrop, TetrisSfx.tetris, TetrisSfx.levelUp]),
     );
-    expect(soundEffects.played, isNot(contains(TetrisSfx.clear)));
+    expect(soundEffects.playedSfx, isNot(contains(TetrisSfx.clear)));
     expect(tester.takeException(), isNull);
   });
 
@@ -330,8 +394,8 @@ void main() {
     await tester.pump(TetrisGame.lockDelay ~/ 2);
     await tester.pump(TetrisGame.lockDelay ~/ 2);
 
-    expect(soundEffects.played, contains(TetrisSfx.hardLock));
-    expect(soundEffects.played, isNot(contains(TetrisSfx.hardDrop)));
+    expect(soundEffects.playedSfx, contains(TetrisSfx.hardLock));
+    expect(soundEffects.playedSfx, isNot(contains(TetrisSfx.hardDrop)));
     expect(tester.takeException(), isNull);
   });
 
