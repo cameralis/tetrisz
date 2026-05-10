@@ -18,7 +18,7 @@ const _bufferSliverRows = 0.25;
 const _compactTopBarHeight = 54.0;
 const _maxTickDelta = Duration(milliseconds: 250);
 const _snapBackDuration = Duration(milliseconds: 120);
-const _snapCommitDuration = Duration(milliseconds: 140);
+const _snapCommitDuration = Duration(milliseconds: 64);
 const _horizontalIntentFraction = 0.35;
 const _minHorizontalIntentDistance = 20.0;
 const _snapPreviewFraction = 0.25;
@@ -79,10 +79,11 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   double _dragX = 0;
   double _dragY = 0;
   double _snapDragX = 0;
+  double _snapPreviewOffsetCells = 0;
+  double _snapPulseOffsetCells = 0;
   double _snapVisualOffsetCells = 0;
   Animation<double> _snapBackAnimation = const AlwaysStoppedAnimation(0);
   bool _horizontalDragLocked = false;
-  bool _snapCommitAnimating = false;
   bool _musicEnabled = true;
   bool _musicStarted = false;
 
@@ -97,7 +98,8 @@ class _TetrisGamePageState extends State<TetrisGamePage>
           ..addListener(() {
             if (mounted) {
               setState(() {
-                _snapVisualOffsetCells = _snapBackAnimation.value;
+                _snapPulseOffsetCells = _snapBackAnimation.value;
+                _updateSnapVisualOffset();
               });
             }
           });
@@ -221,8 +223,10 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _dragX = 0;
     _dragY = 0;
     _snapDragX = 0;
+    _snapPreviewOffsetCells = 0;
+    _snapPulseOffsetCells = 0;
+    _snapVisualOffsetCells = 0;
     _horizontalDragLocked = false;
-    _snapCommitAnimating = false;
     unawaited(_playMusic());
   }
 
@@ -255,14 +259,8 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       return;
     }
 
-    final commitAnimating =
-        _snapCommitAnimating && _snapBackController.isAnimating;
     var committedColumns = 0;
-    var targetOffset = _snapVisualOffsetCells;
-    final continuityOffset = _snapVisualOffsetCells;
-    if (!commitAnimating) {
-      _snapBackController.stop();
-    }
+    var pulseDirection = 0;
     setState(() {
       while (_snapDragX.abs() >= snapDistance) {
         final direction = _snapDragX.sign.toInt();
@@ -272,40 +270,30 @@ class _TetrisGamePageState extends State<TetrisGamePage>
         _moveHorizontally(direction);
         _snapDragX -= snapDistance * direction;
         committedColumns += direction;
+        pulseDirection = direction;
       }
 
       final direction = _snapDragX.sign.toInt();
       final blocked = direction != 0 && !_canMoveHorizontally(direction);
       if (blocked) {
-        targetOffset = _snapBlockedFraction * direction;
+        _snapPreviewOffsetCells = _snapBlockedFraction * direction;
         _snapDragX = 0;
       } else {
-        targetOffset = _snapPreviewOffsetForDrag(_snapDragX, snapDistance);
+        _snapPreviewOffsetCells = _snapPreviewOffsetForDrag(
+          _snapDragX,
+          snapDistance,
+        );
       }
 
-      if (committedColumns == 0) {
-        if (!commitAnimating) {
-          _snapVisualOffsetCells = targetOffset;
-        }
-      } else {
-        _snapVisualOffsetCells = continuityOffset.abs() < 0.001
-            ? (committedColumns.sign * (_snapPreviewFraction - 1)).toDouble()
-            : continuityOffset - committedColumns;
+      if (committedColumns != 0) {
+        _snapPulseOffsetCells = (pulseDirection * (_snapPreviewFraction - 1))
+            .toDouble();
       }
+      _updateSnapVisualOffset();
     });
 
     if (committedColumns != 0) {
-      _animateSnapVisualOffsetTo(
-        targetOffset,
-        _snapCommitDuration,
-        commit: true,
-      );
-    } else if (commitAnimating) {
-      _animateSnapVisualOffsetTo(
-        targetOffset,
-        _snapCommitDuration,
-        commit: true,
-      );
+      _animateSnapPulseToZero(_snapCommitDuration);
     }
   }
 
@@ -326,7 +314,6 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _dragY = 0;
     _snapDragX = 0;
     _horizontalDragLocked = false;
-    _snapCommitAnimating = false;
     _dragPointer = null;
   }
 
@@ -336,7 +323,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
         _dragY.abs() >= verticalThreshold &&
         _dragY.abs() > _dragX.abs()) {
       _snapBackController.stop();
-      _snapVisualOffsetCells = 0;
+      _resetSnapOffsets();
       if (_dragY < 0) {
         _runAction(_game.hold);
       } else {
@@ -349,7 +336,6 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _dragY = 0;
     _snapDragX = 0;
     _horizontalDragLocked = false;
-    _snapCommitAnimating = false;
   }
 
   void _moveHorizontally(int direction) {
@@ -386,31 +372,44 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   }
 
   void _animateSnapBack() {
-    _animateSnapVisualOffsetTo(0, _snapBackDuration);
+    _snapBackController.stop();
+    if (_snapVisualOffsetCells.abs() < 0.001) {
+      _resetSnapOffsets();
+      return;
+    }
+
+    _snapPulseOffsetCells = _snapVisualOffsetCells;
+    _snapPreviewOffsetCells = 0;
+    _animateSnapPulseToZero(_snapBackDuration);
   }
 
-  void _animateSnapVisualOffsetTo(
-    double target,
-    Duration duration, {
-    bool commit = false,
-  }) {
+  void _animateSnapPulseToZero(Duration duration) {
     _snapBackController.stop();
-    _snapCommitAnimating = commit;
-    if ((_snapVisualOffsetCells - target).abs() < 0.001) {
-      _snapVisualOffsetCells = target;
-      _snapCommitAnimating = false;
+    if (_snapPulseOffsetCells.abs() < 0.001) {
+      _snapPulseOffsetCells = 0;
+      _updateSnapVisualOffset();
       return;
     }
 
     _snapBackController.duration = duration;
-    _snapBackAnimation =
-        Tween<double>(begin: _snapVisualOffsetCells, end: target).animate(
+    _snapBackAnimation = Tween<double>(begin: _snapPulseOffsetCells, end: 0)
+        .animate(
           CurvedAnimation(
             parent: _snapBackController,
             curve: Curves.easeOutCubic,
           ),
         );
     _snapBackController.forward(from: 0);
+  }
+
+  void _updateSnapVisualOffset() {
+    _snapVisualOffsetCells = _snapPreviewOffsetCells + _snapPulseOffsetCells;
+  }
+
+  void _resetSnapOffsets() {
+    _snapPreviewOffsetCells = 0;
+    _snapPulseOffsetCells = 0;
+    _snapVisualOffsetCells = 0;
   }
 
   double _snapPreviewOffsetForDrag(double dragX, double snapDistance) {

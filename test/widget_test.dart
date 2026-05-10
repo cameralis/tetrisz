@@ -11,7 +11,7 @@ const _committingSnapDrag = Offset(34, 0);
 const _partialDiagonalDownDrag = Offset(24, 96);
 const _committingDiagonalDownDrag = Offset(34, 96);
 const _committingDiagonalUpDrag = Offset(34, -96);
-const _snapCommitDuration = Duration(milliseconds: 140);
+const _snapCommitDuration = Duration(milliseconds: 64);
 const _snapPreviewFraction = 0.25;
 const _snapCommitFraction = 0.7;
 const _snapBlockedFraction = 0.22;
@@ -237,10 +237,10 @@ void main() {
     expect(game.active!.x, startX + 1);
     expect(
       _boardActiveHorizontalOffset(tester),
-      closeTo(_snapPreviewFraction - 1, 0.01),
+      closeTo(residualOffset + _snapPreviewFraction - 1, 0.01),
     );
 
-    await tester.pump(const Duration(milliseconds: 45));
+    await tester.pump(const Duration(milliseconds: 16));
 
     final midAnimationOffset = _boardActiveHorizontalOffset(tester);
     expect(midAnimationOffset, greaterThan(_snapPreviewFraction - 1));
@@ -259,7 +259,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('horizontal snap animation retargets while dragging', (
+  testWidgets('horizontal snap animation tracks drag without restarting', (
     tester,
   ) async {
     _usePhoneViewport(tester);
@@ -272,7 +272,7 @@ void main() {
     final gesture = await tester.startGesture(tester.getCenter(board));
     await gesture.moveBy(_committingSnapDrag);
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 45));
+    await tester.pump(const Duration(milliseconds: 16));
 
     expect(_boardActiveHorizontalOffset(tester), lessThan(0));
 
@@ -285,7 +285,7 @@ void main() {
     await gesture.moveBy(const Offset(2, 0));
     await tester.pump();
 
-    expect(_boardActiveHorizontalOffset(tester), lessThan(0));
+    expect(_boardActiveHorizontalOffset(tester), lessThan(targetOffset));
 
     await tester.pump(_snapCommitDuration);
 
@@ -390,7 +390,7 @@ void main() {
       expect(game.active!.x, lessThan(wallX));
       expect(
         _boardActiveHorizontalOffset(tester),
-        closeTo(1 + _snapBlockedFraction, 0.01),
+        closeTo(1 - _snapPreviewFraction, 0.1),
       );
 
       await tester.pump(_snapCommitDuration);
@@ -405,6 +405,38 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('large horizontal drag commits without visual backlog', (
+    tester,
+  ) async {
+    _usePhoneViewport(tester);
+    final game = _visiblePieceGame(Tetromino.t);
+    final startX = game.active!.x;
+
+    await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
+    await tester.pump();
+
+    final board = find.byKey(const ValueKey('tetris-board'));
+    final gesture = await tester.startGesture(tester.getCenter(board));
+    await gesture.moveBy(const Offset(180, 0));
+    await tester.pump();
+
+    expect(game.active!.x, greaterThan(startX + 1));
+    expect(_boardActiveHorizontalOffset(tester), greaterThan(-0.8));
+    expect(_boardActiveHorizontalOffset(tester), lessThan(0.3));
+
+    await tester.pump(_snapCommitDuration);
+
+    expect(_boardActiveHorizontalOffset(tester).abs(), lessThanOrEqualTo(0.25));
+
+    await gesture.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 140));
+
+    expect(game.active!.x, greaterThan(startX + 1));
+    expect(_boardActiveHorizontalOffset(tester), 0);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('horizontal drag lock prevents hard drop after dragging down', (
     tester,
