@@ -5,6 +5,7 @@ import 'package:tetris/src/game/tetromino.dart';
 import 'package:tetris/src/ui/tetris_app.dart';
 
 const _phoneViewport = Size(390, 844);
+const _staleFrameGap = Duration(seconds: 20);
 
 void _usePhoneViewport(WidgetTester tester) {
   tester.view.physicalSize = _phoneViewport;
@@ -102,7 +103,7 @@ void main() {
 
     _expectFreshZeroGame(game);
 
-    await tester.pump(const Duration(milliseconds: 16));
+    await tester.pump(_staleFrameGap);
 
     _expectFreshZeroGame(game);
     await expectLater(
@@ -121,18 +122,16 @@ void main() {
 
     await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
     await tester.pump();
-    await tester.pump(const Duration(seconds: 20));
+
+    game.hardDrop();
+    await tester.pump();
 
     expect(_visibleLockedCellCount(game), greaterThan(0));
 
     await tester.tap(find.byTooltip('Pause'));
     await tester.pump();
     await tester.tap(find.byTooltip('Restart'));
-    await tester.pump();
-
-    _expectFreshZeroGame(game);
-
-    await tester.pump(const Duration(milliseconds: 16));
+    await tester.pump(_staleFrameGap);
 
     _expectFreshZeroGame(game);
     expect(tester.takeException(), isNull);

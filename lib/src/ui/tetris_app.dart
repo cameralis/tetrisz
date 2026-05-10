@@ -16,6 +16,7 @@ const _gridLine = Color(0x12FFFFFF);
 const _boardBack = Color(0xFF07080A);
 const _bufferSliverRows = 0.25;
 const _compactTopBarHeight = 54.0;
+const _maxTickDelta = Duration(milliseconds: 250);
 const _boardAspectRatio =
     TetrisGame.width / (TetrisGame.visibleRows + _bufferSliverRows);
 
@@ -106,7 +107,10 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   void _onFrame(Duration elapsed) {
     final delta = elapsed - _lastFrameElapsed;
     _lastFrameElapsed = elapsed;
-    if (delta <= Duration.zero || _game.paused || _game.gameOver) {
+    if (delta <= Duration.zero ||
+        delta > _maxTickDelta ||
+        _game.paused ||
+        _game.gameOver) {
       return;
     }
 
