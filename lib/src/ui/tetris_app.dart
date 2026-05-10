@@ -1244,22 +1244,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
               return _buildCompactLayout(constraints);
             }
 
-            return Stack(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: _buildWideLayout(constraints),
-                ),
-                Positioned(
-                  top: 12,
-                  right: 12,
-                  child: _TopControls(
-                    paused: _game.paused,
-                    onPause: _togglePause,
-                  ),
-                ),
-              ],
-            );
+            return _buildWideLayout(constraints);
           },
         ),
       ),
@@ -1267,22 +1252,19 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   }
 
   Widget _buildWideLayout(BoxConstraints constraints) {
-    final boardHeight = math.min(constraints.maxHeight - 24, 760.0);
-    final boardWidth = boardHeight * _boardAspectRatio;
+    final boardHeight = math.min(constraints.maxHeight, 760.0);
+    final boardWidth = math.min(
+      constraints.maxWidth,
+      boardHeight * _boardAspectRatio,
+    );
+    final resolvedBoardHeight = boardWidth / _boardAspectRatio;
+    final cellSize = _cellSizeFor(boardWidth, resolvedBoardHeight);
 
-    return Center(
-      child: SizedBox(
-        height: boardHeight,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            SizedBox(width: 172, child: _buildLeftRail()),
-            const SizedBox(width: 14),
-            _buildBoard(boardWidth, boardHeight),
-            const SizedBox(width: 14),
-            SizedBox(width: 188, child: _buildRightRail()),
-          ],
+    return SizedBox.expand(
+      child: _buildGestureSurface(
+        cellSize: cellSize,
+        child: Center(
+          child: _buildBoardCanvas(boardWidth, resolvedBoardHeight),
         ),
       ),
     );
@@ -1321,112 +1303,93 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     );
   }
 
-  Widget _buildLeftRail() {
-    return Column(
-      children: [
-        _TitlePanel(score: _game.score, level: _game.level, lines: _game.lines),
-        const SizedBox(height: 12),
-        _PiecePanel(title: 'HOLD', piece: _game.holdPiece),
-        const SizedBox(height: 12),
-        Expanded(
-          child: _StatsPanel(
-            score: _game.score,
-            level: _game.level,
-            lines: _game.lines,
-            combo: _game.combo,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildRightRail() {
-    return Column(
-      children: [
-        Expanded(child: _NextPanel(queue: _game.nextQueue)),
-        const SizedBox(height: 12),
-        _ActionPanel(
-          onRestart: _restart,
-          onRotateLeft: _rotateCounterClockwise,
-          onRotateRight: _rotateClockwise,
-          onHold: () => _runAction(_game.hold),
-          onDrop: _hardDrop,
-        ),
-      ],
-    );
-  }
-
   Widget _buildBoard(double width, double height) {
-    final cellSize = math.min(
+    return _buildGestureSurface(
+      cellSize: _cellSizeFor(width, height),
+      child: _buildBoardCanvas(width, height),
+    );
+  }
+
+  double _cellSizeFor(double width, double height) {
+    return math.min(
       width / TetrisGame.width,
       height / (TetrisGame.visibleRows + _bufferSliverRows),
     );
+  }
 
+  Widget _buildGestureSurface({
+    required double cellSize,
+    required Widget child,
+  }) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Listener(
+          behavior: HitTestBehavior.opaque,
+          onPointerDown: _handlePointerDown,
+          onPointerMove: (event) => _handlePointerMove(event, cellSize),
+          onPointerUp: _handlePointerUp,
+          onPointerCancel: _handlePointerCancel,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTapUp: (details) {
+              if (!_boardAcceptsInput) {
+                return;
+              }
+              if (details.localPosition.dx > constraints.maxWidth / 2) {
+                _rotateClockwise();
+              } else {
+                _rotateCounterClockwise();
+              }
+            },
+            onLongPressStart: (_) {
+              if (_boardAcceptsInput && !_horizontalDragLocked) {
+                _startSoftDrop();
+              }
+            },
+            onLongPressEnd: (_) => _stopSoftDrop(),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildBoardCanvas(double width, double height) {
     return SizedBox(
       key: const ValueKey('tetris-board'),
       width: width,
       height: height,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          return Listener(
-            behavior: HitTestBehavior.opaque,
-            onPointerDown: _handlePointerDown,
-            onPointerMove: (event) => _handlePointerMove(event, cellSize),
-            onPointerUp: _handlePointerUp,
-            onPointerCancel: _handlePointerCancel,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTapUp: (details) {
-                if (!_boardAcceptsInput) {
-                  return;
-                }
-                if (details.localPosition.dx > constraints.maxWidth / 2) {
-                  _rotateClockwise();
-                } else {
-                  _rotateCounterClockwise();
-                }
-              },
-              onLongPressStart: (_) {
-                if (_boardAcceptsInput && !_horizontalDragLocked) {
-                  _startSoftDrop();
-                }
-              },
-              onLongPressEnd: (_) => _stopSoftDrop(),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  RepaintBoundary(
-                    child: CustomPaint(
-                      painter: _BoardPainter(
-                        game: _game,
-                        activeHorizontalOffset: _snapVisualOffsetCells,
-                        boardImpactOffset: _boardImpactOffsetCells,
-                        lineClearSnapshot: _lineClearSnapshot,
-                        lineClearProgress: _lineClearController.value,
-                        lineClearSnapShader: _lineClearSnapWarmUpComplete
-                            ? _lineClearSnapShader
-                            : null,
-                        lineClearSnapImage: _lineClearSnapImage,
-                      ),
-                      size: Size.infinite,
-                    ),
-                  ),
-                  if (_game.gameOver || _game.paused)
-                    _GameOverlay(
-                      gameOver: _game.gameOver,
-                      score: _game.score,
-                      musicVolume: _musicVolume,
-                      sfxVolume: _sfxVolume,
-                      onMusicVolumeChanged: _setMusicVolume,
-                      onSfxVolumeChanged: _setSfxVolume,
-                      onRestart: _restart,
-                      onResume: _togglePause,
-                    ),
-                ],
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          RepaintBoundary(
+            child: CustomPaint(
+              painter: _BoardPainter(
+                game: _game,
+                activeHorizontalOffset: _snapVisualOffsetCells,
+                boardImpactOffset: _boardImpactOffsetCells,
+                lineClearSnapshot: _lineClearSnapshot,
+                lineClearProgress: _lineClearController.value,
+                lineClearSnapShader: _lineClearSnapWarmUpComplete
+                    ? _lineClearSnapShader
+                    : null,
+                lineClearSnapImage: _lineClearSnapImage,
               ),
+              size: Size.infinite,
             ),
-          );
-        },
+          ),
+          if (_game.gameOver || _game.paused)
+            _GameOverlay(
+              gameOver: _game.gameOver,
+              score: _game.score,
+              musicVolume: _musicVolume,
+              sfxVolume: _sfxVolume,
+              onMusicVolumeChanged: _setMusicVolume,
+              onSfxVolumeChanged: _setSfxVolume,
+              onRestart: _restart,
+              onResume: _togglePause,
+            ),
+        ],
       ),
     );
   }
@@ -1597,217 +1560,6 @@ class _TopControls extends StatelessWidget {
     }
 
     return _Panel(child: controls);
-  }
-}
-
-class _TitlePanel extends StatelessWidget {
-  const _TitlePanel({
-    required this.score,
-    required this.level,
-    required this.lines,
-  });
-
-  final int score;
-  final int level;
-  final int lines;
-
-  @override
-  Widget build(BuildContext context) {
-    return _Panel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'TETRIS',
-            style: TextStyle(
-              fontSize: 30,
-              fontWeight: FontWeight.w900,
-              height: 0.9,
-            ),
-          ),
-          const SizedBox(height: 14),
-          _Metric(label: 'SCORE', value: score.toString()),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: _Metric(label: 'LEVEL', value: level.toString()),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _Metric(label: 'LINES', value: lines.toString()),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatsPanel extends StatelessWidget {
-  const _StatsPanel({
-    required this.score,
-    required this.level,
-    required this.lines,
-    required this.combo,
-  });
-
-  final int score;
-  final int level;
-  final int lines;
-  final int combo;
-
-  @override
-  Widget build(BuildContext context) {
-    return _Panel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _Metric(label: 'SCORE', value: score.toString()),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: _Metric(label: 'LEVEL', value: level.toString()),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _Metric(label: 'LINES', value: lines.toString()),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          _Metric(label: 'COMBO', value: math.max(combo, 0).toString()),
-        ],
-      ),
-    );
-  }
-}
-
-class _PiecePanel extends StatelessWidget {
-  const _PiecePanel({required this.title, required this.piece});
-
-  final String title;
-  final Tetromino? piece;
-
-  @override
-  Widget build(BuildContext context) {
-    return _Panel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _PanelTitle(title),
-          const SizedBox(height: 12),
-          SizedBox.square(
-            dimension: 96,
-            child: piece == null
-                ? const Center(
-                    child: Text(
-                      '-',
-                      style: TextStyle(fontSize: 26, color: _mutedText),
-                    ),
-                  )
-                : CustomPaint(painter: _PiecePreviewPainter(piece!)),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _NextPanel extends StatelessWidget {
-  const _NextPanel({required this.queue});
-
-  final List<Tetromino> queue;
-
-  @override
-  Widget build(BuildContext context) {
-    return _Panel(
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final bounded = constraints.hasBoundedHeight;
-          final gaps = math.max(0, queue.length - 1) * 6.0;
-          const headerHeight = 30.0;
-          final previewHeight = bounded && queue.isNotEmpty
-              ? ((constraints.maxHeight - headerHeight - gaps) / queue.length)
-                    .clamp(36.0, 54.0)
-              : 48.0;
-
-          return Column(
-            mainAxisSize: bounded ? MainAxisSize.max : MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const _PanelTitle('NEXT'),
-              const SizedBox(height: 10),
-              for (var index = 0; index < queue.length; index += 1) ...[
-                SizedBox(
-                  height: previewHeight,
-                  child: CustomPaint(
-                    painter: _PiecePreviewPainter(queue[index]),
-                  ),
-                ),
-                if (index != queue.length - 1) const SizedBox(height: 6),
-              ],
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _ActionPanel extends StatelessWidget {
-  const _ActionPanel({
-    required this.onRestart,
-    required this.onRotateLeft,
-    required this.onRotateRight,
-    required this.onHold,
-    required this.onDrop,
-  });
-
-  final VoidCallback onRestart;
-  final VoidCallback onRotateLeft;
-  final VoidCallback onRotateRight;
-  final VoidCallback onHold;
-  final VoidCallback onDrop;
-
-  @override
-  Widget build(BuildContext context) {
-    return _Panel(
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        alignment: WrapAlignment.center,
-        children: [
-          _ControlButton(
-            tooltip: 'Rotate counter-clockwise',
-            icon: Icons.rotate_left_rounded,
-            onPressed: onRotateLeft,
-          ),
-          _ControlButton(
-            tooltip: 'Rotate clockwise',
-            icon: Icons.rotate_right_rounded,
-            onPressed: onRotateRight,
-          ),
-          _ControlButton(
-            tooltip: 'Hold',
-            icon: Icons.swap_vert_rounded,
-            onPressed: onHold,
-          ),
-          _ControlButton(
-            tooltip: 'Hard drop',
-            icon: Icons.keyboard_double_arrow_down_rounded,
-            onPressed: onDrop,
-          ),
-          _ControlButton(
-            tooltip: 'Restart',
-            icon: Icons.restart_alt_rounded,
-            onPressed: onRestart,
-          ),
-        ],
-      ),
-    );
   }
 }
 
@@ -2070,24 +1822,6 @@ class _Panel extends StatelessWidget {
         ],
       ),
       child: Padding(padding: const EdgeInsets.all(12), child: child),
-    );
-  }
-}
-
-class _PanelTitle extends StatelessWidget {
-  const _PanelTitle(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: const TextStyle(
-        color: _mutedText,
-        fontSize: 12,
-        fontWeight: FontWeight.w800,
-      ),
     );
   }
 }

@@ -11,6 +11,7 @@ import 'package:tetris/src/game/tetromino.dart';
 import 'package:tetris/src/ui/tetris_app.dart';
 
 const _phoneViewport = Size(390, 844);
+const _landscapeViewport = Size(844, 390);
 const _staleFrameGap = Duration(seconds: 20);
 const _partialSnapDrag = Offset(24, 0);
 const _committingSnapDrag = Offset(34, 0);
@@ -27,6 +28,13 @@ const _largeWallDrag = Offset(240, 0);
 
 void _usePhoneViewport(WidgetTester tester) {
   tester.view.physicalSize = _phoneViewport;
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+}
+
+void _useLandscapeViewport(WidgetTester tester) {
+  tester.view.physicalSize = _landscapeViewport;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
@@ -344,15 +352,18 @@ void main() {
   });
 
   testWidgets('renders the playable Tetris surface', (tester) async {
+    _usePhoneViewport(tester);
+
     await tester.pumpWidget(const TetrisApp(enableAudio: false));
     await tester.pump();
 
-    expect(find.text('TETRIS'), findsOneWidget);
+    expect(find.text('TETRIS'), findsNothing);
     expect(find.text('HOLD'), findsOneWidget);
     expect(find.text('NEXT'), findsOneWidget);
     expect(find.text('SCORE'), findsWidgets);
     expect(find.byType(CustomPaint), findsWidgets);
-    expect(find.byTooltip('Restart'), findsOneWidget);
+    expect(find.byTooltip('Pause'), findsOneWidget);
+    expect(find.byTooltip('Restart'), findsNothing);
   });
 
   testWidgets('renders without overflow on a phone viewport', (tester) async {
@@ -387,6 +398,59 @@ void main() {
     await tester.pump();
 
     expect(tester.getRect(board), boardRect);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('landscape renders board only without controls', (tester) async {
+    _useLandscapeViewport(tester);
+
+    await tester.pumpWidget(const TetrisApp(enableAudio: false));
+    await tester.pump();
+
+    final board = find.byKey(const ValueKey('tetris-board'));
+    final boardRect = tester.getRect(board);
+
+    expect(find.byKey(const ValueKey('compact-top-bar')), findsNothing);
+    expect(find.text('TETRIS'), findsNothing);
+    expect(find.text('HOLD'), findsNothing);
+    expect(find.text('NEXT'), findsNothing);
+    expect(find.text('SCORE'), findsNothing);
+    expect(find.text('LINES'), findsNothing);
+    expect(find.byTooltip('Pause'), findsNothing);
+    expect(find.byTooltip('Rotate clockwise'), findsNothing);
+    expect(find.byTooltip('Rotate counter-clockwise'), findsNothing);
+    expect(find.byTooltip('Hard drop'), findsNothing);
+    expect(find.byTooltip('Hold'), findsNothing);
+    expect(find.byTooltip('Restart'), findsNothing);
+    expect(boardRect.top, greaterThanOrEqualTo(0));
+    expect(boardRect.left, greaterThanOrEqualTo(0));
+    expect(boardRect.right, lessThanOrEqualTo(_landscapeViewport.width));
+    expect(boardRect.bottom, lessThanOrEqualTo(_landscapeViewport.height));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('landscape gestures work outside the board', (tester) async {
+    _useLandscapeViewport(tester);
+    final game = _visiblePieceGame(Tetromino.t);
+    final startX = game.active!.x;
+
+    await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
+    await tester.pump();
+
+    final boardRect = tester.getRect(
+      find.byKey(const ValueKey('tetris-board')),
+    );
+    final dragStart = Offset(boardRect.left / 2, boardRect.center.dy);
+
+    expect(dragStart.dx, lessThan(boardRect.left));
+
+    final gesture = await tester.startGesture(dragStart);
+    await gesture.moveBy(const Offset(24, 0));
+    await tester.pump();
+    await gesture.up();
+    await tester.pump();
+
+    expect(game.active!.x, greaterThan(startX));
     expect(tester.takeException(), isNull);
   });
 
