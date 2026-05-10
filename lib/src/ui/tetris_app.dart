@@ -20,7 +20,6 @@ const _compactTopBarHeight = 54.0;
 const _maxTickDelta = Duration(milliseconds: 250);
 const _snapBackDuration = Duration(milliseconds: 120);
 const _snapCommitDuration = Duration(milliseconds: 64);
-const _hardDropAnimationDuration = Duration(milliseconds: 72);
 const _lineClearAnimationDuration = Duration(milliseconds: 240);
 const _lineClearDropDelay = Duration(milliseconds: 24);
 const _horizontalIntentFraction = 0.35;
@@ -283,7 +282,6 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   late final TetrisGame _game;
   late final Ticker _ticker;
   late final AnimationController _snapBackController;
-  late final AnimationController _hardDropController;
   late final AnimationController _lineClearController;
   late final TetrisSoundEffects _soundEffects;
   late final bool _disposeSoundEffects;
@@ -302,9 +300,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   double _snapPulseOffsetCells = 0;
   double _snapVisualOffsetCells = 0;
   Animation<double> _snapBackAnimation = const AlwaysStoppedAnimation(0);
-  Animation<double> _hardDropAnimation = const AlwaysStoppedAnimation(0);
   bool _horizontalDragLocked = false;
-  bool _hardDropAnimating = false;
   bool _lineClearAnimating = false;
   bool _musicStarted = false;
   bool _volumePreferencesLoaded = false;
@@ -313,14 +309,10 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   int _lineClearAnimationSerial = 0;
   double _musicVolume = _defaultMusicVolume;
   double _sfxVolume = _defaultSfxVolume;
-  double _hardDropVisualOffsetCells = 0;
   LineClearAnimationSnapshot? _lineClearSnapshot;
 
   bool get _boardAcceptsInput =>
-      !_game.paused &&
-      !_game.gameOver &&
-      !_hardDropAnimating &&
-      !_lineClearAnimating;
+      !_game.paused && !_game.gameOver && !_lineClearAnimating;
 
   Set<int> get _lineClearHiddenColumns {
     return _lineClearColumnOrder.take(_lineClearHiddenColumnCount).toSet();
@@ -351,15 +343,6 @@ class _TetrisGamePageState extends State<TetrisGamePage>
               setState(() {
                 _snapPulseOffsetCells = _snapBackAnimation.value;
                 _updateSnapVisualOffset();
-              });
-            }
-          });
-    _hardDropController =
-        AnimationController(vsync: this, duration: _hardDropAnimationDuration)
-          ..addListener(() {
-            if (mounted) {
-              setState(() {
-                _hardDropVisualOffsetCells = _hardDropAnimation.value;
               });
             }
           });
@@ -395,7 +378,6 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     WidgetsBinding.instance.removeObserver(this);
     _softDropTimer?.cancel();
     _snapBackController.dispose();
-    _hardDropController.dispose();
     _lineClearController.dispose();
     _ticker.dispose();
     unawaited(_musicCompleteSubscription?.cancel() ?? Future.value());
@@ -426,7 +408,6 @@ class _TetrisGamePageState extends State<TetrisGamePage>
         delta > _maxTickDelta ||
         _game.paused ||
         _game.gameOver ||
-        _hardDropAnimating ||
         _lineClearAnimating) {
       return;
     }
@@ -630,12 +611,9 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   }
 
   void _restart() {
-    _hardDropController.stop();
     _lineClearController.stop();
     _lineClearAnimationSerial += 1;
     setState(() {
-      _hardDropAnimating = false;
-      _hardDropVisualOffsetCells = 0;
       _lineClearAnimating = false;
       _lineClearSnapshot = null;
       _lineClearHiddenColumnCount = 0;
@@ -740,45 +718,9 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     if (!_boardAcceptsInput) {
       return;
     }
-    unawaited(_animateHardDrop());
-  }
-
-  Future<void> _animateHardDrop() async {
-    final distance = _game.hardDropDistance;
-    if (distance <= 0) {
-      _commitHardDrop();
-      return;
-    }
-
     _stopSoftDrop();
     _snapBackController.stop();
     _resetSnapOffsets();
-    _hardDropController.stop();
-    _hardDropAnimation = Tween<double>(begin: 0, end: distance.toDouble())
-        .animate(
-          CurvedAnimation(
-            parent: _hardDropController,
-            curve: Curves.easeInCubic,
-          ),
-        );
-    setState(() {
-      _hardDropAnimating = true;
-      _hardDropVisualOffsetCells = 0;
-    });
-
-    try {
-      await _hardDropController.forward(from: 0).orCancel;
-    } on TickerCanceled {
-      return;
-    }
-    if (!mounted) {
-      return;
-    }
-
-    setState(() {
-      _hardDropAnimating = false;
-      _hardDropVisualOffsetCells = 0;
-    });
     _commitHardDrop();
   }
 
@@ -1174,7 +1116,6 @@ class _TetrisGamePageState extends State<TetrisGamePage>
                       painter: _BoardPainter(
                         game: _game,
                         activeHorizontalOffset: _snapVisualOffsetCells,
-                        activeVerticalOffset: _hardDropVisualOffsetCells,
                         lineClearSnapshot: _lineClearSnapshot,
                         lineClearHiddenColumns: _lineClearHiddenColumns,
                       ),
@@ -1911,14 +1852,12 @@ class _BoardPainter extends CustomPainter {
   const _BoardPainter({
     required this.game,
     required this.activeHorizontalOffset,
-    required this.activeVerticalOffset,
     required this.lineClearSnapshot,
     required this.lineClearHiddenColumns,
   });
 
   final TetrisGame game;
   final double activeHorizontalOffset;
-  final double activeVerticalOffset;
   final LineClearAnimationSnapshot? lineClearSnapshot;
   final Set<int> lineClearHiddenColumns;
 
@@ -1962,7 +1901,7 @@ class _BoardPainter extends CustomPainter {
       }
     }
 
-    if (lineClearSnapshot == null && activeVerticalOffset == 0) {
+    if (lineClearSnapshot == null) {
       for (final cell in game.ghostCells) {
         final y = cell.y - TetrisGame.bufferRows;
         if (y >= 0 && y < TetrisGame.visibleRows) {
@@ -1980,7 +1919,7 @@ class _BoardPainter extends CustomPainter {
 
     if (lineClearSnapshot == null) {
       for (final cell in game.activeCells) {
-        final y = cell.y - TetrisGame.bufferRows + activeVerticalOffset;
+        final y = cell.y - TetrisGame.bufferRows;
         if (y >= 0 && y < TetrisGame.visibleRows) {
           _drawMino(
             canvas,
@@ -2028,7 +1967,7 @@ class _BoardPainter extends CustomPainter {
       }
     }
 
-    if (lineClearSnapshot == null && activeVerticalOffset == 0) {
+    if (lineClearSnapshot == null) {
       for (final cell in game.ghostCells) {
         drawSliverCell(
           cell,

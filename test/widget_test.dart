@@ -17,7 +17,6 @@ const _partialDiagonalDownDrag = Offset(24, 96);
 const _committingDiagonalDownDrag = Offset(34, 96);
 const _committingDiagonalUpDrag = Offset(34, -96);
 const _snapCommitDuration = Duration(milliseconds: 64);
-const _hardDropAnimationDuration = Duration(milliseconds: 72);
 const _lineClearStepDuration = Duration(milliseconds: 24);
 const _lineClearAnimationDuration = Duration(milliseconds: 240);
 const _lineClearDropDelay = Duration(milliseconds: 24);
@@ -56,27 +55,6 @@ double _boardActiveHorizontalOffset(WidgetTester tester) {
     (paint) => paint.painter.runtimeType.toString() == '_BoardPainter',
   );
   return (boardPaint.painter as dynamic).activeHorizontalOffset as double;
-}
-
-double _boardActiveVerticalOffset(WidgetTester tester) {
-  final boardPaints = tester.widgetList<CustomPaint>(
-    find.descendant(
-      of: find.byKey(const ValueKey('tetris-board')),
-      matching: find.byType(CustomPaint),
-    ),
-  );
-  final boardPaint = boardPaints.singleWhere(
-    (paint) => paint.painter.runtimeType.toString() == '_BoardPainter',
-  );
-  return (boardPaint.painter as dynamic).activeVerticalOffset as double;
-}
-
-Future<void> _finishHardDropAnimation(WidgetTester tester) async {
-  await tester.pump(
-    _hardDropAnimationDuration + const Duration(milliseconds: 1),
-  );
-  await tester.idle();
-  await tester.pump();
 }
 
 Future<void> _finishLineClearAnimation(WidgetTester tester) async {
@@ -611,7 +589,6 @@ void main() {
     final board = find.byKey(const ValueKey('tetris-board'));
     await tester.drag(board, const Offset(0, 96));
     await tester.pump();
-    await _finishHardDropAnimation(tester);
     await _finishLineClearAnimation(tester);
 
     expect(
@@ -644,7 +621,6 @@ void main() {
     final board = find.byKey(const ValueKey('tetris-board'));
     await tester.drag(board, const Offset(0, 96));
     await tester.pump();
-    await _finishHardDropAnimation(tester);
     await _finishLineClearAnimation(tester);
 
     expect(
@@ -670,7 +646,6 @@ void main() {
       final board = find.byKey(const ValueKey('tetris-board'));
       await tester.drag(board, const Offset(0, 96));
       await tester.pump();
-      await _finishHardDropAnimation(tester);
 
       final snapshot = _boardLineClearSnapshot(tester)!;
       expect(_boardLineClearHiddenColumns(tester), isEmpty);
@@ -725,11 +700,10 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('hard drop animates down before locking', (tester) async {
+  testWidgets('hard drop locks immediately', (tester) async {
     _usePhoneViewport(tester);
     final game = _visiblePieceGame(Tetromino.t);
     final startLockCount = game.lockCount;
-    final hardDropDistance = game.hardDropDistance;
 
     await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
     await tester.pump();
@@ -737,18 +711,9 @@ void main() {
     final board = find.byKey(const ValueKey('tetris-board'));
     await tester.drag(board, const Offset(0, 96));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 32));
-
-    expect(game.lockCount, startLockCount);
-    expect(_visibleLockedCellCount(game), 0);
-    expect(_boardActiveVerticalOffset(tester), greaterThan(0));
-    expect(_boardActiveVerticalOffset(tester), lessThan(hardDropDistance));
-
-    await _finishHardDropAnimation(tester);
 
     expect(game.lockCount, startLockCount + 1);
     expect(_visibleLockedCellCount(game), greaterThan(0));
-    expect(_boardActiveVerticalOffset(tester), 0);
     expect(tester.takeException(), isNull);
   });
 
@@ -1271,7 +1236,6 @@ void main() {
       final board = find.byKey(const ValueKey('tetris-board'));
       await tester.drag(board, const Offset(0, 96));
       await tester.pump();
-      await _finishHardDropAnimation(tester);
 
       expect(_visibleLockedCellCount(game), greaterThan(0));
       expect(tester.takeException(), isNull);
@@ -1293,7 +1257,6 @@ void main() {
     await tester.pump();
     await gesture.up();
     await tester.pump();
-    await _finishHardDropAnimation(tester);
 
     expect(_visibleLockedCellCount(game), greaterThan(0));
     expect(tester.takeException(), isNull);
