@@ -20,9 +20,10 @@ const _boardAspectRatio =
     TetrisGame.width / (TetrisGame.visibleRows + _bufferSliverRows);
 
 class TetrisApp extends StatelessWidget {
-  const TetrisApp({super.key, this.enableAudio = true});
+  const TetrisApp({super.key, this.enableAudio = true, this.game});
 
   final bool enableAudio;
+  final TetrisGame? game;
 
   @override
   Widget build(BuildContext context) {
@@ -42,15 +43,16 @@ class TetrisApp extends StatelessWidget {
           displayColor: _text,
         ),
       ),
-      home: TetrisGamePage(enableAudio: enableAudio),
+      home: TetrisGamePage(enableAudio: enableAudio, game: game),
     );
   }
 }
 
 class TetrisGamePage extends StatefulWidget {
-  const TetrisGamePage({super.key, this.enableAudio = true});
+  const TetrisGamePage({super.key, this.enableAudio = true, this.game});
 
   final bool enableAudio;
+  final TetrisGame? game;
 
   @override
   State<TetrisGamePage> createState() => _TetrisGamePageState();
@@ -73,7 +75,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _game = TetrisGame();
+    _game = widget.game ?? TetrisGame();
     _ticker = createTicker(_onFrame)..start();
     if (widget.enableAudio) {
       _musicPlayer = AudioPlayer();
@@ -146,7 +148,6 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   void _restart() {
     _runAction(() {
       _game.restart();
-      _lastFrameElapsed = Duration.zero;
     });
   }
 
