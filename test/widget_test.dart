@@ -26,6 +26,12 @@ void main() {
 
     expect(find.text('HOLD'), findsOneWidget);
     expect(find.text('NEXT'), findsOneWidget);
+    expect(find.byTooltip('Pause'), findsOneWidget);
+    expect(find.byTooltip('Mute'), findsOneWidget);
+    expect(find.byTooltip('Rotate clockwise'), findsNothing);
+    expect(find.byTooltip('Rotate counter-clockwise'), findsNothing);
+    expect(find.byTooltip('Hard drop'), findsNothing);
+    expect(find.byTooltip('Hold'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 }

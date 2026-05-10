@@ -234,9 +234,23 @@ class _TetrisGamePageState extends State<TetrisGamePage>
             final compact = constraints.maxWidth < 760;
             return Padding(
               padding: const EdgeInsets.all(12),
-              child: compact
-                  ? _buildCompactLayout(constraints)
-                  : _buildWideLayout(constraints),
+              child: Stack(
+                children: [
+                  compact
+                      ? _buildCompactLayout(constraints)
+                      : _buildWideLayout(constraints),
+                  Positioned(
+                    top: 0,
+                    right: 0,
+                    child: _TopControls(
+                      paused: _game.paused,
+                      musicEnabled: _musicEnabled,
+                      onPause: _togglePause,
+                      onMusic: _toggleMusic,
+                    ),
+                  ),
+                ],
+              ),
             );
           },
         ),
@@ -291,21 +305,6 @@ class _TetrisGamePageState extends State<TetrisGamePage>
             ),
             const SizedBox(height: 8),
             _buildBoard(boardWidth, boardHeight),
-            const SizedBox(height: 8),
-            ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: boardWidth),
-              child: _ActionPanel(
-                paused: _game.paused,
-                musicEnabled: _musicEnabled,
-                onPause: _togglePause,
-                onRestart: _restart,
-                onMusic: _toggleMusic,
-                onRotateLeft: () => _runAction(_game.rotateCounterClockwise),
-                onRotateRight: () => _runAction(_game.rotateClockwise),
-                onHold: () => _runAction(_game.hold),
-                onDrop: () => _runAction(_game.hardDrop),
-              ),
-            ),
           ],
         ),
       ),
@@ -337,11 +336,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
         Expanded(child: _NextPanel(queue: _game.nextQueue)),
         const SizedBox(height: 12),
         _ActionPanel(
-          paused: _game.paused,
-          musicEnabled: _musicEnabled,
-          onPause: _togglePause,
           onRestart: _restart,
-          onMusic: _toggleMusic,
           onRotateLeft: () => _runAction(_game.rotateCounterClockwise),
           onRotateRight: () => _runAction(_game.rotateClockwise),
           onHold: () => _runAction(_game.hold),
@@ -391,6 +386,44 @@ class _TetrisGamePageState extends State<TetrisGamePage>
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _TopControls extends StatelessWidget {
+  const _TopControls({
+    required this.paused,
+    required this.musicEnabled,
+    required this.onPause,
+    required this.onMusic,
+  });
+
+  final bool paused;
+  final bool musicEnabled;
+  final VoidCallback onPause;
+  final VoidCallback onMusic;
+
+  @override
+  Widget build(BuildContext context) {
+    return _Panel(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _ControlButton(
+            tooltip: paused ? 'Resume' : 'Pause',
+            icon: paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
+            onPressed: onPause,
+          ),
+          const SizedBox(width: 8),
+          _ControlButton(
+            tooltip: musicEnabled ? 'Mute' : 'Music',
+            icon: musicEnabled
+                ? Icons.volume_up_rounded
+                : Icons.volume_off_rounded,
+            onPressed: onMusic,
+          ),
+        ],
       ),
     );
   }
@@ -638,22 +671,14 @@ class _NextPanel extends StatelessWidget {
 
 class _ActionPanel extends StatelessWidget {
   const _ActionPanel({
-    required this.paused,
-    required this.musicEnabled,
-    required this.onPause,
     required this.onRestart,
-    required this.onMusic,
     required this.onRotateLeft,
     required this.onRotateRight,
     required this.onHold,
     required this.onDrop,
   });
 
-  final bool paused;
-  final bool musicEnabled;
-  final VoidCallback onPause;
   final VoidCallback onRestart;
-  final VoidCallback onMusic;
   final VoidCallback onRotateLeft;
   final VoidCallback onRotateRight;
   final VoidCallback onHold;
@@ -688,21 +713,9 @@ class _ActionPanel extends StatelessWidget {
             onPressed: onDrop,
           ),
           _ControlButton(
-            tooltip: paused ? 'Resume' : 'Pause',
-            icon: paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
-            onPressed: onPause,
-          ),
-          _ControlButton(
             tooltip: 'Restart',
             icon: Icons.restart_alt_rounded,
             onPressed: onRestart,
-          ),
-          _ControlButton(
-            tooltip: musicEnabled ? 'Mute' : 'Music',
-            icon: musicEnabled
-                ? Icons.volume_up_rounded
-                : Icons.volume_off_rounded,
-            onPressed: onMusic,
           ),
         ],
       ),
