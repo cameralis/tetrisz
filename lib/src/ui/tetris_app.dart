@@ -215,6 +215,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _dragX = 0;
     _dragY = 0;
     _snapDragX = 0;
+    unawaited(_playMusic());
   }
 
   void _handlePointerMove(PointerMoveEvent event, double cellSize) {
@@ -236,7 +237,6 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     }
 
     _snapBackController.stop();
-    var moved = false;
     setState(() {
       while (_snapDragX.abs() >= snapDistance) {
         final direction = _snapDragX.sign.toInt();
@@ -245,18 +245,18 @@ class _TetrisGamePageState extends State<TetrisGamePage>
         }
         _moveHorizontally(direction);
         _snapDragX -= snapDistance * direction;
-        moved = true;
       }
 
       final direction = _snapDragX.sign.toInt();
       final blocked = direction != 0 && !_canMoveHorizontally(direction);
       final limit = blocked ? _snapBlockedFraction : _snapCommitFraction;
-      _snapVisualOffsetCells = (_snapDragX / cellSize).clamp(-limit, limit);
+      if (blocked) {
+        _snapVisualOffsetCells = limit * direction;
+        _snapDragX = 0;
+      } else {
+        _snapVisualOffsetCells = (_snapDragX / cellSize).clamp(-limit, limit);
+      }
     });
-
-    if (moved) {
-      unawaited(_playMusic());
-    }
   }
 
   void _handlePointerUp(PointerUpEvent event) {

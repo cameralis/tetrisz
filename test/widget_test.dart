@@ -9,6 +9,7 @@ const _staleFrameGap = Duration(seconds: 20);
 const _partialSnapDrag = Offset(24, 0);
 const _committingSnapDrag = Offset(34, 0);
 const _snapCommitFraction = 0.7;
+const _largeWallDrag = Offset(240, 0);
 
 void _usePhoneViewport(WidgetTester tester) {
   tester.view.physicalSize = _phoneViewport;
@@ -288,6 +289,40 @@ void main() {
     expect(_boardActiveHorizontalOffset(tester), 0);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'horizontal drag responds immediately after reversing at a wall',
+    (tester) async {
+      _usePhoneViewport(tester);
+      final game = _visiblePieceGame(Tetromino.t);
+      while (game.moveRight()) {}
+      final wallX = game.active!.x;
+
+      await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
+      await tester.pump();
+
+      final board = find.byKey(const ValueKey('tetris-board'));
+      final gesture = await tester.startGesture(tester.getCenter(board));
+      await gesture.moveBy(_largeWallDrag);
+      await tester.pump();
+
+      expect(game.active!.x, wallX);
+      expect(_boardActiveHorizontalOffset(tester), closeTo(0.22, 0.01));
+
+      await gesture.moveBy(-_committingSnapDrag);
+      await tester.pump();
+
+      expect(game.active!.x, lessThan(wallX));
+      expect(_boardActiveHorizontalOffset(tester), lessThanOrEqualTo(0));
+
+      await gesture.up();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 140));
+
+      expect(_boardActiveHorizontalOffset(tester), 0);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets(
     'vertical swipe still hard drops while horizontal snap is active',
