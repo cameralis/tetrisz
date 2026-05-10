@@ -822,12 +822,13 @@ void main() {
 
     final impact = _boardImpactOffset(tester);
     expect(impact.dx, 0);
-    expect(impact.dy, greaterThan(0.45));
+    expect(impact.dy, greaterThan(0.32));
+    expect(impact.dy, lessThan(0.4));
 
-    await tester.pump(const Duration(milliseconds: 420));
+    await tester.pump(const Duration(milliseconds: 650));
     expect(_boardImpactOffset(tester).distance, greaterThan(0.01));
 
-    await tester.pump(const Duration(milliseconds: 420));
+    await tester.pump(const Duration(milliseconds: 650));
     expect(_boardImpactOffset(tester), Offset.zero);
     expect(tester.takeException(), isNull);
   });
@@ -890,7 +891,7 @@ void main() {
     await tester.pump();
 
     final initialImpact = _boardImpactOffset(tester);
-    expect(initialImpact.dx, lessThan(-0.25));
+    expect(initialImpact.dx, lessThan(-0.16));
 
     await tester.pump(const Duration(milliseconds: 160));
     final progressedImpact = _boardImpactOffset(tester);
@@ -901,6 +902,42 @@ void main() {
 
     final sustainedImpact = _boardImpactOffset(tester);
     expect(sustainedImpact.dx, isNot(closeTo(initialImpact.dx, 0.02)));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('same drag does not replay a wall impact after edge jitter', (
+    tester,
+  ) async {
+    _usePhoneViewport(tester);
+    final game = _visiblePieceGame(Tetromino.t);
+    while (game.moveLeft()) {}
+
+    await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
+    await tester.pump();
+
+    final board = find.byKey(const ValueKey('tetris-board'));
+    final gesture = await tester.startGesture(tester.getCenter(board));
+    await gesture.moveBy(-_committingSnapDrag);
+    await tester.pump();
+
+    final initialImpact = _boardImpactOffset(tester);
+    expect(initialImpact.dx, lessThan(-0.16));
+
+    await tester.pump(const Duration(milliseconds: 220));
+    expect(
+      _boardImpactOffset(tester).dx,
+      isNot(closeTo(initialImpact.dx, 0.02)),
+    );
+
+    await gesture.moveBy(_committingSnapDrag);
+    await tester.pump();
+    await gesture.moveBy(-_committingSnapDrag);
+    await tester.pump();
+    await gesture.moveBy(-_committingSnapDrag);
+    await tester.pump();
+
+    final replayAttemptImpact = _boardImpactOffset(tester);
+    expect(replayAttemptImpact.dx, isNot(closeTo(initialImpact.dx, 0.02)));
     expect(tester.takeException(), isNull);
   });
 
