@@ -8,6 +8,7 @@ const _phoneViewport = Size(390, 844);
 const _staleFrameGap = Duration(seconds: 20);
 const _partialSnapDrag = Offset(24, 0);
 const _committingSnapDrag = Offset(34, 0);
+const _partialDiagonalDownDrag = Offset(24, 96);
 const _committingDiagonalDownDrag = Offset(34, 96);
 const _committingDiagonalUpDrag = Offset(34, -96);
 const _snapCommitFraction = 0.7;
@@ -387,6 +388,103 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('horizontal intent prevents hard drop before column snap', (
+    tester,
+  ) async {
+    _usePhoneViewport(tester);
+    final game = _visiblePieceGame(Tetromino.t);
+    final startX = game.active!.x;
+
+    await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
+    await tester.pump();
+
+    final board = find.byKey(const ValueKey('tetris-board'));
+    final gesture = await tester.startGesture(tester.getCenter(board));
+    await gesture.moveBy(_partialSnapDrag);
+    await tester.pump();
+
+    expect(game.active!.x, startX);
+    expect(_boardActiveHorizontalOffset(tester), greaterThan(0));
+
+    await gesture.moveBy(const Offset(0, 96));
+    await tester.pump();
+
+    expect(_visibleLockedCellCount(game), 0);
+
+    await gesture.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 140));
+
+    expect(game.active, isNotNull);
+    expect(game.active!.x, startX);
+    expect(_visibleLockedCellCount(game), 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('horizontal intent prevents hold before column snap', (
+    tester,
+  ) async {
+    _usePhoneViewport(tester);
+    final game = _visiblePieceGame(Tetromino.t);
+    final startX = game.active!.x;
+    final activeType = game.active!.type;
+
+    await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
+    await tester.pump();
+
+    final board = find.byKey(const ValueKey('tetris-board'));
+    final gesture = await tester.startGesture(tester.getCenter(board));
+    await gesture.moveBy(_partialSnapDrag);
+    await tester.pump();
+
+    expect(game.active!.x, startX);
+    expect(_boardActiveHorizontalOffset(tester), greaterThan(0));
+
+    await gesture.moveBy(const Offset(0, -96));
+    await tester.pump();
+
+    expect(game.holdPiece, isNull);
+
+    await gesture.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 140));
+
+    expect(game.holdPiece, isNull);
+    expect(game.active!.type, activeType);
+    expect(game.active!.x, startX);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'partial diagonal down drag locks horizontal before column snap',
+    (tester) async {
+      _usePhoneViewport(tester);
+      final game = _visiblePieceGame(Tetromino.t);
+      final startX = game.active!.x;
+
+      await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
+      await tester.pump();
+
+      final board = find.byKey(const ValueKey('tetris-board'));
+      final gesture = await tester.startGesture(tester.getCenter(board));
+      await gesture.moveBy(_partialDiagonalDownDrag);
+      await tester.pump();
+
+      expect(game.active!.x, startX);
+      expect(_visibleLockedCellCount(game), 0);
+      expect(_boardActiveHorizontalOffset(tester), greaterThan(0));
+
+      await gesture.up();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 140));
+
+      expect(game.active, isNotNull);
+      expect(game.active!.x, startX);
+      expect(_visibleLockedCellCount(game), 0);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('diagonal down drag locks horizontal during the same move', (
     tester,
   ) async {
@@ -461,4 +559,24 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('vertical swipe with small horizontal drift still hard drops', (
+    tester,
+  ) async {
+    _usePhoneViewport(tester);
+    final game = _visiblePieceGame(Tetromino.t);
+
+    await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
+    await tester.pump();
+
+    final board = find.byKey(const ValueKey('tetris-board'));
+    final gesture = await tester.startGesture(tester.getCenter(board));
+    await gesture.moveBy(const Offset(10, 96));
+    await tester.pump();
+    await gesture.up();
+    await tester.pump();
+
+    expect(_visibleLockedCellCount(game), greaterThan(0));
+    expect(tester.takeException(), isNull);
+  });
 }

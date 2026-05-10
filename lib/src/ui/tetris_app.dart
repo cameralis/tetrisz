@@ -18,6 +18,8 @@ const _bufferSliverRows = 0.25;
 const _compactTopBarHeight = 54.0;
 const _maxTickDelta = Duration(milliseconds: 250);
 const _snapBackDuration = Duration(milliseconds: 120);
+const _horizontalIntentFraction = 0.35;
+const _minHorizontalIntentDistance = 20.0;
 const _snapCommitFraction = 0.7;
 const _snapBlockedFraction = 0.22;
 const _boardAspectRatio =
@@ -234,8 +236,15 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       return;
     }
 
-    if (!_horizontalDragLocked && _snapDragX.abs() >= snapDistance) {
-      _horizontalDragLocked = true;
+    final horizontalIntentDistance = math.min(
+      snapDistance,
+      math.max(
+        _minHorizontalIntentDistance,
+        cellSize * _horizontalIntentFraction,
+      ),
+    );
+    if (!_horizontalDragLocked && _dragX.abs() >= horizontalIntentDistance) {
+      _lockHorizontalDrag();
     }
 
     if (!_horizontalDragLocked && _dragX.abs() < _dragY.abs()) {
@@ -312,6 +321,11 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     } else {
       _game.moveRight();
     }
+  }
+
+  void _lockHorizontalDrag() {
+    _horizontalDragLocked = true;
+    _stopSoftDrop();
   }
 
   bool _canMoveHorizontally(int direction) {
@@ -506,7 +520,11 @@ class _TetrisGamePageState extends State<TetrisGamePage>
                   _runAction(_game.rotateCounterClockwise);
                 }
               },
-              onLongPressStart: (_) => _startSoftDrop(),
+              onLongPressStart: (_) {
+                if (!_horizontalDragLocked) {
+                  _startSoftDrop();
+                }
+              },
               onLongPressEnd: (_) => _stopSoftDrop(),
               child: Stack(
                 fit: StackFit.expand,
