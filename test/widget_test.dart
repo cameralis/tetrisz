@@ -11,6 +11,8 @@ const _committingSnapDrag = Offset(34, 0);
 const _partialDiagonalDownDrag = Offset(24, 96);
 const _committingDiagonalDownDrag = Offset(34, 96);
 const _committingDiagonalUpDrag = Offset(34, -96);
+const _snapCommitDuration = Duration(milliseconds: 90);
+const _snapPreviewFraction = 0.25;
 const _snapCommitFraction = 0.7;
 const _largeWallDrag = Offset(240, 0);
 
@@ -44,6 +46,12 @@ double _boardActiveHorizontalOffset(WidgetTester tester) {
     (paint) => paint.painter.runtimeType.toString() == '_BoardPainter',
   );
   return (boardPaint.painter as dynamic).activeHorizontalOffset as double;
+}
+
+double _previewOffsetForDrag(double dragX, double cellWidth) {
+  return ((dragX / (cellWidth * _snapCommitFraction)) * _snapPreviewFraction)
+      .clamp(-_snapPreviewFraction, _snapPreviewFraction)
+      .toDouble();
 }
 
 void _expectFreshZeroGame(TetrisGame game) {
@@ -180,13 +188,11 @@ void main() {
     await gesture.moveBy(_partialSnapDrag);
     await tester.pump();
 
+    final cellWidth = _phoneViewport.width / TetrisGame.width;
     expect(game.active!.x, startX);
     expect(
       _boardActiveHorizontalOffset(tester),
-      closeTo(
-        _partialSnapDrag.dx / (_phoneViewport.width / TetrisGame.width),
-        0.01,
-      ),
+      closeTo(_previewOffsetForDrag(_partialSnapDrag.dx, cellWidth), 0.01),
     );
     await expectLater(
       find.byType(Scaffold),
@@ -222,10 +228,25 @@ void main() {
     await tester.pump();
 
     final cellWidth = _phoneViewport.width / TetrisGame.width;
-    final residualOffset =
-        (_committingSnapDrag.dx - cellWidth * _snapCommitFraction) / cellWidth;
+    final residualOffset = _previewOffsetForDrag(
+      _committingSnapDrag.dx - cellWidth * _snapCommitFraction,
+      cellWidth,
+    );
 
     expect(game.active!.x, startX + 1);
+    expect(
+      _boardActiveHorizontalOffset(tester),
+      closeTo(_snapPreviewFraction - 1, 0.01),
+    );
+
+    await tester.pump(const Duration(milliseconds: 45));
+
+    final midAnimationOffset = _boardActiveHorizontalOffset(tester);
+    expect(midAnimationOffset, greaterThan(_snapPreviewFraction - 1));
+    expect(midAnimationOffset, lessThan(residualOffset));
+
+    await tester.pump(_snapCommitDuration);
+
     expect(_boardActiveHorizontalOffset(tester), closeTo(residualOffset, 0.01));
 
     await gesture.up();
@@ -255,6 +276,10 @@ void main() {
       await tester.pump();
 
       expect(game.active!.x, startX + 2);
+      expect(_boardActiveHorizontalOffset(tester), lessThan(0));
+
+      await tester.pump(_snapCommitDuration);
+
       expect(_boardActiveHorizontalOffset(tester), greaterThan(0));
 
       await gesture.up();
@@ -316,6 +341,13 @@ void main() {
       await tester.pump();
 
       expect(game.active!.x, lessThan(wallX));
+      expect(
+        _boardActiveHorizontalOffset(tester),
+        closeTo(1 - _snapPreviewFraction, 0.01),
+      );
+
+      await tester.pump(_snapCommitDuration);
+
       expect(_boardActiveHorizontalOffset(tester), lessThanOrEqualTo(0));
 
       await gesture.up();

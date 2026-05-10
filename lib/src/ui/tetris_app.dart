@@ -18,8 +18,10 @@ const _bufferSliverRows = 0.25;
 const _compactTopBarHeight = 54.0;
 const _maxTickDelta = Duration(milliseconds: 250);
 const _snapBackDuration = Duration(milliseconds: 120);
+const _snapCommitDuration = Duration(milliseconds: 90);
 const _horizontalIntentFraction = 0.35;
 const _minHorizontalIntentDistance = 20.0;
+const _snapPreviewFraction = 0.25;
 const _snapCommitFraction = 0.7;
 const _snapBlockedFraction = 0.22;
 const _boardAspectRatio =
@@ -252,6 +254,8 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     }
 
     _snapBackController.stop();
+    var committedColumns = 0;
+    var targetOffset = _snapVisualOffsetCells;
     setState(() {
       while (_snapDragX.abs() >= snapDistance) {
         final direction = _snapDragX.sign.toInt();
@@ -260,18 +264,29 @@ class _TetrisGamePageState extends State<TetrisGamePage>
         }
         _moveHorizontally(direction);
         _snapDragX -= snapDistance * direction;
+        committedColumns += direction;
       }
 
       final direction = _snapDragX.sign.toInt();
       final blocked = direction != 0 && !_canMoveHorizontally(direction);
-      final limit = blocked ? _snapBlockedFraction : _snapCommitFraction;
       if (blocked) {
-        _snapVisualOffsetCells = limit * direction;
+        targetOffset = _snapBlockedFraction * direction;
         _snapDragX = 0;
       } else {
-        _snapVisualOffsetCells = (_snapDragX / cellSize).clamp(-limit, limit);
+        targetOffset = _snapPreviewOffsetForDrag(_snapDragX, snapDistance);
+      }
+
+      if (committedColumns == 0) {
+        _snapVisualOffsetCells = targetOffset;
+      } else {
+        _snapVisualOffsetCells =
+            (committedColumns.sign * (_snapPreviewFraction - 1)).toDouble();
       }
     });
+
+    if (committedColumns != 0) {
+      _animateSnapVisualOffsetTo(targetOffset, _snapCommitDuration);
+    }
   }
 
   void _handlePointerUp(PointerUpEvent event) {
@@ -349,20 +364,35 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   }
 
   void _animateSnapBack() {
+    _animateSnapVisualOffsetTo(0, _snapBackDuration);
+  }
+
+  void _animateSnapVisualOffsetTo(double target, Duration duration) {
     _snapBackController.stop();
-    if (_snapVisualOffsetCells.abs() < 0.001) {
-      _snapVisualOffsetCells = 0;
+    if ((_snapVisualOffsetCells - target).abs() < 0.001) {
+      _snapVisualOffsetCells = target;
       return;
     }
 
-    _snapBackAnimation = Tween<double>(begin: _snapVisualOffsetCells, end: 0)
-        .animate(
+    _snapBackController.duration = duration;
+    _snapBackAnimation =
+        Tween<double>(begin: _snapVisualOffsetCells, end: target).animate(
           CurvedAnimation(
             parent: _snapBackController,
             curve: Curves.easeOutCubic,
           ),
         );
     _snapBackController.forward(from: 0);
+  }
+
+  double _snapPreviewOffsetForDrag(double dragX, double snapDistance) {
+    if (snapDistance <= 0) {
+      return 0;
+    }
+
+    return ((dragX / snapDistance) * _snapPreviewFraction)
+        .clamp(-_snapPreviewFraction, _snapPreviewFraction)
+        .toDouble();
   }
 
   @override
