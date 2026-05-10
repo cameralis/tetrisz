@@ -8,6 +8,8 @@ const _phoneViewport = Size(390, 844);
 const _staleFrameGap = Duration(seconds: 20);
 const _partialSnapDrag = Offset(24, 0);
 const _committingSnapDrag = Offset(34, 0);
+const _committingDiagonalDownDrag = Offset(34, 96);
+const _committingDiagonalUpDrag = Offset(34, -96);
 const _snapCommitFraction = 0.7;
 const _largeWallDrag = Offset(240, 0);
 
@@ -323,6 +325,124 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('horizontal drag lock prevents hard drop after dragging down', (
+    tester,
+  ) async {
+    _usePhoneViewport(tester);
+    final game = _visiblePieceGame(Tetromino.t);
+    final startX = game.active!.x;
+
+    await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
+    await tester.pump();
+
+    final board = find.byKey(const ValueKey('tetris-board'));
+    final gesture = await tester.startGesture(tester.getCenter(board));
+    await gesture.moveBy(_committingSnapDrag);
+    await tester.pump();
+    await gesture.moveBy(const Offset(0, 96));
+    await tester.pump();
+
+    expect(game.active!.x, startX + 1);
+    expect(_visibleLockedCellCount(game), 0);
+
+    await gesture.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 140));
+
+    expect(game.active, isNotNull);
+    expect(game.active!.x, startX + 1);
+    expect(_visibleLockedCellCount(game), 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('horizontal drag lock prevents hold after dragging up', (
+    tester,
+  ) async {
+    _usePhoneViewport(tester);
+    final game = _visiblePieceGame(Tetromino.t);
+    final startX = game.active!.x;
+    final activeType = game.active!.type;
+
+    await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
+    await tester.pump();
+
+    final board = find.byKey(const ValueKey('tetris-board'));
+    final gesture = await tester.startGesture(tester.getCenter(board));
+    await gesture.moveBy(_committingSnapDrag);
+    await tester.pump();
+    await gesture.moveBy(const Offset(0, -96));
+    await tester.pump();
+
+    expect(game.active!.x, startX + 1);
+    expect(game.holdPiece, isNull);
+
+    await gesture.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 140));
+
+    expect(game.holdPiece, isNull);
+    expect(game.active!.type, activeType);
+    expect(game.active!.x, startX + 1);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('diagonal down drag locks horizontal during the same move', (
+    tester,
+  ) async {
+    _usePhoneViewport(tester);
+    final game = _visiblePieceGame(Tetromino.t);
+    final startX = game.active!.x;
+
+    await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
+    await tester.pump();
+
+    final board = find.byKey(const ValueKey('tetris-board'));
+    final gesture = await tester.startGesture(tester.getCenter(board));
+    await gesture.moveBy(_committingDiagonalDownDrag);
+    await tester.pump();
+
+    expect(game.active!.x, startX + 1);
+    expect(_visibleLockedCellCount(game), 0);
+
+    await gesture.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 140));
+
+    expect(game.active, isNotNull);
+    expect(game.active!.x, startX + 1);
+    expect(_visibleLockedCellCount(game), 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('diagonal up drag locks horizontal during the same move', (
+    tester,
+  ) async {
+    _usePhoneViewport(tester);
+    final game = _visiblePieceGame(Tetromino.t);
+    final startX = game.active!.x;
+    final activeType = game.active!.type;
+
+    await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
+    await tester.pump();
+
+    final board = find.byKey(const ValueKey('tetris-board'));
+    final gesture = await tester.startGesture(tester.getCenter(board));
+    await gesture.moveBy(_committingDiagonalUpDrag);
+    await tester.pump();
+
+    expect(game.active!.x, startX + 1);
+    expect(game.holdPiece, isNull);
+
+    await gesture.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 140));
+
+    expect(game.holdPiece, isNull);
+    expect(game.active!.type, activeType);
+    expect(game.active!.x, startX + 1);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets(
     'vertical swipe still hard drops while horizontal snap is active',

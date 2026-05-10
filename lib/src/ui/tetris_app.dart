@@ -77,6 +77,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   double _snapDragX = 0;
   double _snapVisualOffsetCells = 0;
   Animation<double> _snapBackAnimation = const AlwaysStoppedAnimation(0);
+  bool _horizontalDragLocked = false;
   bool _musicEnabled = true;
   bool _musicStarted = false;
 
@@ -215,6 +216,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _dragX = 0;
     _dragY = 0;
     _snapDragX = 0;
+    _horizontalDragLocked = false;
     unawaited(_playMusic());
   }
 
@@ -227,12 +229,16 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _dragY += event.delta.dy;
     _snapDragX += event.delta.dx;
 
-    if (_dragX.abs() < _dragY.abs()) {
+    final snapDistance = cellSize * _snapCommitFraction;
+    if (snapDistance <= 0) {
       return;
     }
 
-    final snapDistance = cellSize * _snapCommitFraction;
-    if (snapDistance <= 0) {
+    if (!_horizontalDragLocked && _snapDragX.abs() >= snapDistance) {
+      _horizontalDragLocked = true;
+    }
+
+    if (!_horizontalDragLocked && _dragX.abs() < _dragY.abs()) {
       return;
     }
 
@@ -275,12 +281,15 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _dragX = 0;
     _dragY = 0;
     _snapDragX = 0;
+    _horizontalDragLocked = false;
     _dragPointer = null;
   }
 
   void _finishDrag() {
     const verticalThreshold = 48.0;
-    if (_dragY.abs() >= verticalThreshold && _dragY.abs() > _dragX.abs()) {
+    if (!_horizontalDragLocked &&
+        _dragY.abs() >= verticalThreshold &&
+        _dragY.abs() > _dragX.abs()) {
       _snapBackController.stop();
       _snapVisualOffsetCells = 0;
       if (_dragY < 0) {
@@ -294,6 +303,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _dragX = 0;
     _dragY = 0;
     _snapDragX = 0;
+    _horizontalDragLocked = false;
   }
 
   void _moveHorizontally(int direction) {
