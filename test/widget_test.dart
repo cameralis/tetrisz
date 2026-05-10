@@ -169,6 +169,15 @@ final class _RecordingSoundEffects implements TetrisSoundEffects {
   }
 }
 
+final class _RecordingHaptics implements TetrisHaptics {
+  final played = <TetrisHaptic>[];
+
+  @override
+  void play(TetrisHaptic haptic) {
+    played.add(haptic);
+  }
+}
+
 final class _RecordingMusicPlayer implements TetrisMusicPlayer {
   final playedAssets = <String>[];
   final volumes = <double>[];
@@ -391,6 +400,75 @@ void main() {
     expect(soundEffects.playedSfx, contains(TetrisSfx.slide));
     expect(soundEffects.playedSfx, contains(TetrisSfx.rotate));
     expect(soundEffects.playedSfx, contains(TetrisSfx.counterRotate));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('maps gameplay haptics to tactile feedback types', (
+    tester,
+  ) async {
+    final calls = <MethodCall>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+          calls.add(call);
+          return null;
+        });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null);
+    });
+
+    const haptics = PlatformTetrisHaptics();
+    haptics.play(TetrisHaptic.move);
+    haptics.play(TetrisHaptic.softDrop);
+    haptics.play(TetrisHaptic.rotate);
+    haptics.play(TetrisHaptic.hardDrop);
+    await tester.idle();
+
+    expect(
+      calls.map((call) => call.method),
+      everyElement('HapticFeedback.vibrate'),
+    );
+    expect(calls.map((call) => call.arguments), [
+      'HapticFeedbackType.selectionClick',
+      'HapticFeedbackType.selectionClick',
+      'HapticFeedbackType.mediumImpact',
+      'HapticFeedbackType.heavyImpact',
+    ]);
+  });
+
+  testWidgets('plays gameplay haptics on piece actions', (tester) async {
+    _usePhoneViewport(tester);
+    final game = _visiblePieceGame(Tetromino.t);
+    final haptics = _RecordingHaptics();
+
+    await tester.pumpWidget(
+      TetrisApp(enableAudio: false, game: game, haptics: haptics),
+    );
+    await tester.pump();
+
+    final board = find.byKey(const ValueKey('tetris-board'));
+    final slideGesture = await tester.startGesture(tester.getCenter(board));
+    await slideGesture.moveBy(_committingSnapDrag);
+    await tester.pump();
+    await slideGesture.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 140));
+
+    await tester.tapAt(tester.getCenter(board) + const Offset(60, 0));
+    await tester.pump();
+
+    final softDropGesture = await tester.startGesture(tester.getCenter(board));
+    await tester.pump(const Duration(milliseconds: 600));
+    await softDropGesture.up();
+    await tester.pump();
+
+    await tester.drag(board, const Offset(0, 96));
+    await tester.pump();
+
+    expect(haptics.played, contains(TetrisHaptic.move));
+    expect(haptics.played, contains(TetrisHaptic.rotate));
+    expect(haptics.played, contains(TetrisHaptic.softDrop));
+    expect(haptics.played, contains(TetrisHaptic.hardDrop));
     expect(tester.takeException(), isNull);
   });
 

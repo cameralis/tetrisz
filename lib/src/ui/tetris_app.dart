@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../game/tetris_game.dart';
@@ -79,6 +80,8 @@ enum TetrisSfx {
 
   final String assetPath;
 }
+
+enum TetrisHaptic { move, softDrop, rotate, hardDrop }
 
 abstract interface class TetrisMusicPlayer {
   Stream<void> get onTrackComplete;
@@ -197,6 +200,24 @@ final class AssetTetrisSoundEffects implements TetrisSoundEffects {
   }
 }
 
+abstract interface class TetrisHaptics {
+  void play(TetrisHaptic haptic);
+}
+
+final class PlatformTetrisHaptics implements TetrisHaptics {
+  const PlatformTetrisHaptics();
+
+  @override
+  void play(TetrisHaptic haptic) {
+    unawaited(switch (haptic) {
+      TetrisHaptic.move ||
+      TetrisHaptic.softDrop => HapticFeedback.selectionClick(),
+      TetrisHaptic.rotate => HapticFeedback.mediumImpact(),
+      TetrisHaptic.hardDrop => HapticFeedback.heavyImpact(),
+    });
+  }
+}
+
 final class _SoundSnapshot {
   const _SoundSnapshot({
     required this.lockCount,
@@ -224,12 +245,14 @@ class TetrisApp extends StatelessWidget {
     this.game,
     this.musicPlayer,
     this.soundEffects,
+    this.haptics,
   });
 
   final bool enableAudio;
   final TetrisGame? game;
   final TetrisMusicPlayer? musicPlayer;
   final TetrisSoundEffects? soundEffects;
+  final TetrisHaptics? haptics;
 
   @override
   Widget build(BuildContext context) {
@@ -254,6 +277,7 @@ class TetrisApp extends StatelessWidget {
         game: game,
         musicPlayer: musicPlayer,
         soundEffects: soundEffects,
+        haptics: haptics,
       ),
     );
   }
@@ -266,12 +290,14 @@ class TetrisGamePage extends StatefulWidget {
     this.game,
     this.musicPlayer,
     this.soundEffects,
+    this.haptics,
   });
 
   final bool enableAudio;
   final TetrisGame? game;
   final TetrisMusicPlayer? musicPlayer;
   final TetrisSoundEffects? soundEffects;
+  final TetrisHaptics? haptics;
 
   @override
   State<TetrisGamePage> createState() => _TetrisGamePageState();
@@ -284,6 +310,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   late final AnimationController _snapBackController;
   late final AnimationController _lineClearController;
   late final TetrisSoundEffects _soundEffects;
+  late final TetrisHaptics _haptics;
   late final bool _disposeSoundEffects;
   late final bool _disposeMusicPlayer;
   Future<void>? _volumePreferencesFuture;
@@ -335,6 +362,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       _soundEffects = const NoopTetrisSoundEffects();
       _disposeSoundEffects = false;
     }
+    _haptics = widget.haptics ?? const PlatformTetrisHaptics();
     _ticker = createTicker(_onFrame)..start();
     _snapBackController =
         AnimationController(vsync: this, duration: _snapBackDuration)
@@ -519,6 +547,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   T _runGameAction<T>(
     T Function() action, {
     TetrisSfx? successSfx,
+    TetrisHaptic? successHaptic,
     bool Function(T result, _SoundSnapshot before)? didSucceed,
     bool suppressLockSfx = false,
   }) {
@@ -533,6 +562,9 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     final succeeded = didSucceed?.call(result, before) ?? true;
     if (succeeded && successSfx != null) {
       _playSfx(successSfx);
+    }
+    if (succeeded && successHaptic != null) {
+      _playHaptic(successHaptic);
     }
     _playPostActionSfx(before, suppressLockSfx: suppressLockSfx);
     if (lineClearSnapshot != null) {
@@ -608,6 +640,10 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       return;
     }
     _soundEffects.play(sfx, volume: _sfxVolume);
+  }
+
+  void _playHaptic(TetrisHaptic haptic) {
+    _haptics.play(haptic);
   }
 
   void _restart() {
@@ -710,6 +746,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _runGameAction<bool>(
       _game.softDropStep,
       successSfx: TetrisSfx.softDrop,
+      successHaptic: TetrisHaptic.softDrop,
       didSucceed: (moved, _) => moved,
     );
   }
@@ -728,6 +765,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _runGameAction<int>(
       _game.hardDrop,
       successSfx: TetrisSfx.hardDrop,
+      successHaptic: TetrisHaptic.hardDrop,
       didSucceed: (_, before) => _game.lockCount > before.lockCount,
       suppressLockSfx: true,
     );
@@ -740,6 +778,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _runGameAction<bool>(
       _game.rotateClockwise,
       successSfx: TetrisSfx.rotate,
+      successHaptic: TetrisHaptic.rotate,
       didSucceed: (rotated, _) => rotated,
     );
   }
@@ -751,6 +790,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _runGameAction<bool>(
       _game.rotateCounterClockwise,
       successSfx: TetrisSfx.counterRotate,
+      successHaptic: TetrisHaptic.rotate,
       didSucceed: (rotated, _) => rotated,
     );
   }
@@ -819,6 +859,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
 
     if (committedColumns != 0) {
       _playSfx(TetrisSfx.slide);
+      _playHaptic(TetrisHaptic.move);
       _animateSnapPulseToZero(_snapCommitDuration);
     }
   }
