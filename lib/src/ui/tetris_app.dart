@@ -20,6 +20,7 @@ const _compactTopBarHeight = 54.0;
 const _maxTickDelta = Duration(milliseconds: 250);
 const _snapBackDuration = Duration(milliseconds: 120);
 const _snapCommitDuration = Duration(milliseconds: 64);
+const _hardDropAnimationDuration = Duration(milliseconds: 72);
 const _horizontalIntentFraction = 0.35;
 const _minHorizontalIntentDistance = 20.0;
 const _snapPreviewFraction = 0.25;
@@ -258,6 +259,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   late final TetrisGame _game;
   late final Ticker _ticker;
   late final AnimationController _snapBackController;
+  late final AnimationController _hardDropController;
   late final TetrisSoundEffects _soundEffects;
   late final bool _disposeSoundEffects;
   late final bool _disposeMusicPlayer;
@@ -275,14 +277,18 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   double _snapPulseOffsetCells = 0;
   double _snapVisualOffsetCells = 0;
   Animation<double> _snapBackAnimation = const AlwaysStoppedAnimation(0);
+  Animation<double> _hardDropAnimation = const AlwaysStoppedAnimation(0);
   bool _horizontalDragLocked = false;
+  bool _hardDropAnimating = false;
   bool _musicStarted = false;
   bool _volumePreferencesLoaded = false;
   int _musicTrackIndex = 0;
   double _musicVolume = _defaultMusicVolume;
   double _sfxVolume = _defaultSfxVolume;
+  double _hardDropVisualOffsetCells = 0;
 
-  bool get _boardAcceptsInput => !_game.paused && !_game.gameOver;
+  bool get _boardAcceptsInput =>
+      !_game.paused && !_game.gameOver && !_hardDropAnimating;
 
   @override
   void initState() {
@@ -312,6 +318,15 @@ class _TetrisGamePageState extends State<TetrisGamePage>
               });
             }
           });
+    _hardDropController =
+        AnimationController(vsync: this, duration: _hardDropAnimationDuration)
+          ..addListener(() {
+            if (mounted) {
+              setState(() {
+                _hardDropVisualOffsetCells = _hardDropAnimation.value;
+              });
+            }
+          });
     if (widget.enableAudio) {
       _musicPlayer = widget.musicPlayer ?? AssetTetrisMusicPlayer();
       _disposeMusicPlayer = widget.musicPlayer == null;
@@ -331,6 +346,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     WidgetsBinding.instance.removeObserver(this);
     _softDropTimer?.cancel();
     _snapBackController.dispose();
+    _hardDropController.dispose();
     _ticker.dispose();
     unawaited(_musicCompleteSubscription?.cancel() ?? Future.value());
     if (_disposeSoundEffects) {
@@ -359,7 +375,8 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     if (delta <= Duration.zero ||
         delta > _maxTickDelta ||
         _game.paused ||
-        _game.gameOver) {
+        _game.gameOver ||
+        _hardDropAnimating) {
       return;
     }
 
@@ -506,7 +523,10 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   }
 
   void _restart() {
+    _hardDropController.stop();
     setState(() {
+      _hardDropAnimating = false;
+      _hardDropVisualOffsetCells = 0;
       _game.restart();
     });
     unawaited(_restartMusicPlaylist());
@@ -602,6 +622,52 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   }
 
   void _hardDrop() {
+    if (!_boardAcceptsInput) {
+      return;
+    }
+    unawaited(_animateHardDrop());
+  }
+
+  Future<void> _animateHardDrop() async {
+    final distance = _game.hardDropDistance;
+    if (distance <= 0) {
+      _commitHardDrop();
+      return;
+    }
+
+    _stopSoftDrop();
+    _snapBackController.stop();
+    _resetSnapOffsets();
+    _hardDropController.stop();
+    _hardDropAnimation = Tween<double>(begin: 0, end: distance.toDouble())
+        .animate(
+          CurvedAnimation(
+            parent: _hardDropController,
+            curve: Curves.easeInCubic,
+          ),
+        );
+    setState(() {
+      _hardDropAnimating = true;
+      _hardDropVisualOffsetCells = 0;
+    });
+
+    try {
+      await _hardDropController.forward(from: 0).orCancel;
+    } on TickerCanceled {
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _hardDropAnimating = false;
+      _hardDropVisualOffsetCells = 0;
+    });
+    _commitHardDrop();
+  }
+
+  void _commitHardDrop() {
     _runGameAction<int>(
       _game.hardDrop,
       successSfx: TetrisSfx.hardDrop,
@@ -987,6 +1053,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
                       painter: _BoardPainter(
                         game: _game,
                         activeHorizontalOffset: _snapVisualOffsetCells,
+                        activeVerticalOffset: _hardDropVisualOffsetCells,
                       ),
                       size: Size.infinite,
                     ),
@@ -1721,10 +1788,12 @@ class _BoardPainter extends CustomPainter {
   const _BoardPainter({
     required this.game,
     required this.activeHorizontalOffset,
+    required this.activeVerticalOffset,
   });
 
   final TetrisGame game;
   final double activeHorizontalOffset;
+  final double activeVerticalOffset;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1766,22 +1835,24 @@ class _BoardPainter extends CustomPainter {
       }
     }
 
-    for (final cell in game.ghostCells) {
-      final y = cell.y - TetrisGame.bufferRows;
-      if (y >= 0 && y < TetrisGame.visibleRows) {
-        _drawGhost(
-          canvas,
-          visibleOrigin,
-          cellSize,
-          cell.x + activeHorizontalOffset,
-          y,
-          cell.type,
-        );
+    if (activeVerticalOffset == 0) {
+      for (final cell in game.ghostCells) {
+        final y = cell.y - TetrisGame.bufferRows;
+        if (y >= 0 && y < TetrisGame.visibleRows) {
+          _drawGhost(
+            canvas,
+            visibleOrigin,
+            cellSize,
+            cell.x + activeHorizontalOffset,
+            y,
+            cell.type,
+          );
+        }
       }
     }
 
     for (final cell in game.activeCells) {
-      final y = cell.y - TetrisGame.bufferRows;
+      final y = cell.y - TetrisGame.bufferRows + activeVerticalOffset;
       if (y >= 0 && y < TetrisGame.visibleRows) {
         _drawMino(
           canvas,
@@ -1828,31 +1899,33 @@ class _BoardPainter extends CustomPainter {
       }
     }
 
-    for (final cell in game.ghostCells) {
-      drawSliverCell(
-        cell,
-        () => _drawGhost(
-          canvas,
-          hiddenOrigin,
-          cellSize,
-          cell.x + activeHorizontalOffset,
-          0,
-          cell.type,
-        ),
-      );
-    }
-    for (final cell in game.activeCells) {
-      drawSliverCell(
-        cell,
-        () => _drawMino(
-          canvas,
-          hiddenOrigin,
-          cellSize,
-          cell.x + activeHorizontalOffset,
-          0,
-          cell.type,
-        ),
-      );
+    if (activeVerticalOffset == 0) {
+      for (final cell in game.ghostCells) {
+        drawSliverCell(
+          cell,
+          () => _drawGhost(
+            canvas,
+            hiddenOrigin,
+            cellSize,
+            cell.x + activeHorizontalOffset,
+            0,
+            cell.type,
+          ),
+        );
+      }
+      for (final cell in game.activeCells) {
+        drawSliverCell(
+          cell,
+          () => _drawMino(
+            canvas,
+            hiddenOrigin,
+            cellSize,
+            cell.x + activeHorizontalOffset,
+            0,
+            cell.type,
+          ),
+        );
+      }
     }
     canvas.restore();
   }
@@ -1895,10 +1968,10 @@ class _PiecePreviewPainter extends CustomPainter {
   }
 }
 
-Rect _cellRect(Offset origin, double cellSize, num x, int y) {
+Rect _cellRect(Offset origin, double cellSize, num x, num y) {
   return Rect.fromLTWH(
     origin.dx + x.toDouble() * cellSize,
-    origin.dy + y * cellSize,
+    origin.dy + y.toDouble() * cellSize,
     cellSize,
     cellSize,
   );
@@ -1909,7 +1982,7 @@ void _drawMino(
   Offset origin,
   double cellSize,
   num x,
-  int y,
+  num y,
   Tetromino type,
 ) {
   final rect = _cellRect(origin, cellSize, x, y).deflate(cellSize * 0.06);
@@ -1936,7 +2009,7 @@ void _drawGhost(
   Offset origin,
   double cellSize,
   num x,
-  int y,
+  num y,
   Tetromino type,
 ) {
   final rect = _cellRect(origin, cellSize, x, y).deflate(cellSize * 0.12);

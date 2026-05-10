@@ -17,6 +17,7 @@ const _partialDiagonalDownDrag = Offset(24, 96);
 const _committingDiagonalDownDrag = Offset(34, 96);
 const _committingDiagonalUpDrag = Offset(34, -96);
 const _snapCommitDuration = Duration(milliseconds: 64);
+const _hardDropAnimationDuration = Duration(milliseconds: 72);
 const _snapPreviewFraction = 0.25;
 const _snapCommitFraction = 0.7;
 const _snapBlockedFraction = 0.22;
@@ -52,6 +53,27 @@ double _boardActiveHorizontalOffset(WidgetTester tester) {
     (paint) => paint.painter.runtimeType.toString() == '_BoardPainter',
   );
   return (boardPaint.painter as dynamic).activeHorizontalOffset as double;
+}
+
+double _boardActiveVerticalOffset(WidgetTester tester) {
+  final boardPaints = tester.widgetList<CustomPaint>(
+    find.descendant(
+      of: find.byKey(const ValueKey('tetris-board')),
+      matching: find.byType(CustomPaint),
+    ),
+  );
+  final boardPaint = boardPaints.singleWhere(
+    (paint) => paint.painter.runtimeType.toString() == '_BoardPainter',
+  );
+  return (boardPaint.painter as dynamic).activeVerticalOffset as double;
+}
+
+Future<void> _finishHardDropAnimation(WidgetTester tester) async {
+  await tester.pump(
+    _hardDropAnimationDuration + const Duration(milliseconds: 1),
+  );
+  await tester.idle();
+  await tester.pump();
 }
 
 double _previewOffsetForDrag(double dragX, double cellWidth) {
@@ -549,6 +571,7 @@ void main() {
     final board = find.byKey(const ValueKey('tetris-board'));
     await tester.drag(board, const Offset(0, 96));
     await tester.pump();
+    await _finishHardDropAnimation(tester);
 
     expect(
       soundEffects.playedSfx,
@@ -580,6 +603,7 @@ void main() {
     final board = find.byKey(const ValueKey('tetris-board'));
     await tester.drag(board, const Offset(0, 96));
     await tester.pump();
+    await _finishHardDropAnimation(tester);
 
     expect(
       soundEffects.playedSfx,
@@ -605,6 +629,33 @@ void main() {
 
     expect(soundEffects.playedSfx, contains(TetrisSfx.hardLock));
     expect(soundEffects.playedSfx, isNot(contains(TetrisSfx.hardDrop)));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('hard drop animates down before locking', (tester) async {
+    _usePhoneViewport(tester);
+    final game = _visiblePieceGame(Tetromino.t);
+    final startLockCount = game.lockCount;
+    final hardDropDistance = game.hardDropDistance;
+
+    await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
+    await tester.pump();
+
+    final board = find.byKey(const ValueKey('tetris-board'));
+    await tester.drag(board, const Offset(0, 96));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 32));
+
+    expect(game.lockCount, startLockCount);
+    expect(_visibleLockedCellCount(game), 0);
+    expect(_boardActiveVerticalOffset(tester), greaterThan(0));
+    expect(_boardActiveVerticalOffset(tester), lessThan(hardDropDistance));
+
+    await _finishHardDropAnimation(tester);
+
+    expect(game.lockCount, startLockCount + 1);
+    expect(_visibleLockedCellCount(game), greaterThan(0));
+    expect(_boardActiveVerticalOffset(tester), 0);
     expect(tester.takeException(), isNull);
   });
 
@@ -1127,6 +1178,7 @@ void main() {
       final board = find.byKey(const ValueKey('tetris-board'));
       await tester.drag(board, const Offset(0, 96));
       await tester.pump();
+      await _finishHardDropAnimation(tester);
 
       expect(_visibleLockedCellCount(game), greaterThan(0));
       expect(tester.takeException(), isNull);
@@ -1148,6 +1200,7 @@ void main() {
     await tester.pump();
     await gesture.up();
     await tester.pump();
+    await _finishHardDropAnimation(tester);
 
     expect(_visibleLockedCellCount(game), greaterThan(0));
     expect(tester.takeException(), isNull);
