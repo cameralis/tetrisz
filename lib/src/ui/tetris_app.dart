@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../game/tetris_game.dart';
 import '../game/tetromino.dart';
@@ -27,6 +28,8 @@ const _snapBlockedFraction = 0.22;
 const _defaultMusicVolume = 0.3;
 const _defaultSfxVolume = 2.0;
 const _maxSfxVolume = 2.0;
+const _musicVolumePreferenceKey = 'tetris.musicVolume';
+const _sfxVolumePreferenceKey = 'tetris.sfxVolume';
 const _boardAspectRatio =
     TetrisGame.width / (TetrisGame.visibleRows + _bufferSliverRows);
 
@@ -196,6 +199,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   late final AnimationController _snapBackController;
   late final TetrisSoundEffects _soundEffects;
   late final bool _disposeSoundEffects;
+  Future<void>? _volumePreferencesFuture;
   AudioPlayer? _musicPlayer;
   Timer? _softDropTimer;
 
@@ -210,6 +214,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   Animation<double> _snapBackAnimation = const AlwaysStoppedAnimation(0);
   bool _horizontalDragLocked = false;
   bool _musicStarted = false;
+  bool _volumePreferencesLoaded = false;
   double _musicVolume = _defaultMusicVolume;
   double _sfxVolume = _defaultSfxVolume;
 
@@ -220,6 +225,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _game = widget.game ?? TetrisGame();
+    _volumePreferencesFuture = _loadVolumePreferences();
     final soundEffects = widget.soundEffects;
     if (soundEffects != null) {
       _soundEffects = soundEffects;
@@ -244,7 +250,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
           });
     if (widget.enableAudio) {
       _musicPlayer = AudioPlayer();
-      unawaited(_playMusic());
+      unawaited(_playMusicAfterVolumePreferencesLoad());
     }
   }
 
@@ -290,7 +296,52 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     }
   }
 
+  Future<void> _loadVolumePreferences() async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      final musicVolume = preferences.getDouble(_musicVolumePreferenceKey);
+      final sfxVolume = preferences.getDouble(_sfxVolumePreferenceKey);
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        if (musicVolume != null) {
+          _musicVolume = musicVolume.clamp(0.0, 1.0).toDouble();
+        }
+        if (sfxVolume != null) {
+          _sfxVolume = sfxVolume.clamp(0.0, _maxSfxVolume).toDouble();
+        }
+        _volumePreferencesLoaded = true;
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _volumePreferencesLoaded = true;
+        });
+      }
+    }
+  }
+
+  Future<void> _playMusicAfterVolumePreferencesLoad() async {
+    final loading = _volumePreferencesFuture;
+    if (!_volumePreferencesLoaded && loading != null) {
+      await loading;
+    }
+    if (mounted) {
+      await _playMusic();
+    }
+  }
+
   Future<void> _playMusic() async {
+    final loading = _volumePreferencesFuture;
+    if (!_volumePreferencesLoaded && loading != null) {
+      await loading;
+      if (!mounted) {
+        return;
+      }
+    }
+
     if (!widget.enableAudio || _musicVolume <= 0) {
       return;
     }
@@ -385,6 +436,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     setState(() {
       _musicVolume = nextVolume;
     });
+    unawaited(_saveVolumePreference(_musicVolumePreferenceKey, nextVolume));
     unawaited(_applyMusicVolume());
   }
 
@@ -405,9 +457,18 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   }
 
   void _setSfxVolume(double volume) {
+    final nextVolume = volume.clamp(0.0, _maxSfxVolume).toDouble();
     setState(() {
-      _sfxVolume = volume.clamp(0.0, _maxSfxVolume).toDouble();
+      _sfxVolume = nextVolume;
     });
+    unawaited(_saveVolumePreference(_sfxVolumePreferenceKey, nextVolume));
+  }
+
+  Future<void> _saveVolumePreference(String key, double volume) async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setDouble(key, volume);
+    } catch (_) {}
   }
 
   void _handlePointerDown(PointerDownEvent event) {

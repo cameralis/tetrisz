@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tetris/src/game/tetris_game.dart';
 import 'package:tetris/src/game/tetromino.dart';
 import 'package:tetris/src/ui/tetris_app.dart';
@@ -58,6 +59,13 @@ double _previewOffsetForDrag(double dragX, double cellWidth) {
       .toDouble();
 }
 
+Future<void> _flushPreferenceTasks(WidgetTester tester) async {
+  await tester.runAsync(() async {
+    await Future<void>.delayed(Duration.zero);
+  });
+  await tester.pump();
+}
+
 void _expectFreshZeroGame(TetrisGame game) {
   expect(game.score, 0);
   expect(game.lines, 0);
@@ -110,6 +118,10 @@ final class _RecordingSoundEffects implements TetrisSoundEffects {
 }
 
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
+
   testWidgets('all sound effect assets are loadable', (tester) async {
     expect(AssetTetrisSoundEffects().assetPrefix, isEmpty);
     for (final sfx in TetrisSfx.values) {
@@ -302,6 +314,37 @@ void main() {
       (event) => event.sfx == TetrisSfx.rotate,
     );
     expect(changedRotate.volume, 1.25);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('persists changed pause menu volumes across app restart', (
+    tester,
+  ) async {
+    _usePhoneViewport(tester);
+
+    await tester.pumpWidget(const TetrisApp(enableAudio: false));
+    await _flushPreferenceTasks(tester);
+
+    await tester.tap(find.byTooltip('Pause'));
+    await tester.pump();
+
+    final musicSliderFinder = find.byKey(const ValueKey('music-volume-slider'));
+    final sfxSliderFinder = find.byKey(const ValueKey('sfx-volume-slider'));
+    tester.widget<Slider>(musicSliderFinder).onChanged!(0.2);
+    tester.widget<Slider>(sfxSliderFinder).onChanged!(1.25);
+    await _flushPreferenceTasks(tester);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+
+    await tester.pumpWidget(const TetrisApp(enableAudio: false));
+    await _flushPreferenceTasks(tester);
+
+    await tester.tap(find.byTooltip('Pause'));
+    await tester.pump();
+
+    expect(tester.widget<Slider>(musicSliderFinder).value, 0.2);
+    expect(tester.widget<Slider>(sfxSliderFinder).value, 1.25);
     expect(tester.takeException(), isNull);
   });
 
