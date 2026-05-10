@@ -89,6 +89,7 @@ final class TetrisGame {
   int score = 0;
   int level = 1;
   int lines = 0;
+  int lockCount = 0;
   int combo = -1;
   bool backToBack = false;
   LineClearResult lastClear = LineClearResult.none;
@@ -171,6 +172,7 @@ final class TetrisGame {
     score = 0;
     level = 1;
     lines = 0;
+    lockCount = 0;
     combo = -1;
     backToBack = false;
     lastClear = LineClearResult.none;
@@ -367,6 +369,7 @@ final class TetrisGame {
       }
       _board[cell.y][cell.x] = cell.type;
     }
+    lockCount += 1;
 
     final cleared = _clearLines();
     final perfectClear = cleared > 0 && _isBoardEmpty;

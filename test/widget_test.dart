@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tetris/src/game/tetris_game.dart';
@@ -77,7 +79,40 @@ TetrisGame _visiblePieceGame(Tetromino type) {
   return game;
 }
 
+void _fillVisibleRowExcept(
+  TetrisGame game,
+  int visibleY,
+  Set<int> openColumns,
+) {
+  for (var x = 0; x < TetrisGame.width; x += 1) {
+    if (!openColumns.contains(x)) {
+      game.setVisibleCell(x, visibleY, Tetromino.z);
+    }
+  }
+}
+
+final class _RecordingSoundEffects implements TetrisSoundEffects {
+  final played = <TetrisSfx>[];
+  var disposed = false;
+
+  @override
+  void play(TetrisSfx sfx) {
+    played.add(sfx);
+  }
+
+  @override
+  void dispose() {
+    disposed = true;
+  }
+}
+
 void main() {
+  test('all sound effect assets exist', () {
+    for (final sfx in TetrisSfx.values) {
+      expect(File(sfx.assetPath).existsSync(), isTrue, reason: sfx.assetPath);
+    }
+  });
+
   testWidgets('renders the playable Tetris surface', (tester) async {
     await tester.pumpWidget(const TetrisApp(enableAudio: false));
     await tester.pump();
@@ -171,6 +206,128 @@ void main() {
     await tester.pump(_staleFrameGap);
 
     _expectFreshZeroGame(game);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('plays movement and rotation sound effects', (tester) async {
+    _usePhoneViewport(tester);
+    final game = _visiblePieceGame(Tetromino.t);
+    final soundEffects = _RecordingSoundEffects();
+
+    await tester.pumpWidget(
+      TetrisApp(enableAudio: false, game: game, soundEffects: soundEffects),
+    );
+    await tester.pump();
+
+    final board = find.byKey(const ValueKey('tetris-board'));
+    final gesture = await tester.startGesture(tester.getCenter(board));
+    await gesture.moveBy(_committingSnapDrag);
+    await tester.pump();
+    await gesture.up();
+    await tester.pump();
+
+    await tester.tapAt(tester.getCenter(board) + const Offset(60, 0));
+    await tester.pump();
+    await tester.tapAt(tester.getCenter(board) - const Offset(60, 0));
+    await tester.pump();
+
+    expect(soundEffects.played, contains(TetrisSfx.slide));
+    expect(soundEffects.played, contains(TetrisSfx.rotate));
+    expect(soundEffects.played, contains(TetrisSfx.counterRotate));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('plays soft drop sound while long pressing', (tester) async {
+    _usePhoneViewport(tester);
+    final game = _visiblePieceGame(Tetromino.t);
+    final soundEffects = _RecordingSoundEffects();
+
+    await tester.pumpWidget(
+      TetrisApp(enableAudio: false, game: game, soundEffects: soundEffects),
+    );
+    await tester.pump();
+
+    final board = find.byKey(const ValueKey('tetris-board'));
+    final gesture = await tester.startGesture(tester.getCenter(board));
+    await tester.pump(const Duration(milliseconds: 600));
+    await gesture.up();
+    await tester.pump();
+
+    expect(soundEffects.played, contains(TetrisSfx.softDrop));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('plays hard drop and line clear sounds', (tester) async {
+    _usePhoneViewport(tester);
+    final game = TetrisGame(scriptedPieces: [Tetromino.i, Tetromino.o]);
+    final bottom = TetrisGame.visibleRows - 1;
+    _fillVisibleRowExcept(game, bottom, {3, 4, 5, 6});
+    final soundEffects = _RecordingSoundEffects();
+
+    await tester.pumpWidget(
+      TetrisApp(enableAudio: false, game: game, soundEffects: soundEffects),
+    );
+    await tester.pump();
+
+    final board = find.byKey(const ValueKey('tetris-board'));
+    await tester.drag(board, const Offset(0, 96));
+    await tester.pump();
+
+    expect(
+      soundEffects.played,
+      containsAll([TetrisSfx.hardDrop, TetrisSfx.clear]),
+    );
+    expect(soundEffects.played, isNot(contains(TetrisSfx.hardLock)));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('plays tetris and level up sounds', (tester) async {
+    _usePhoneViewport(tester);
+    final game = TetrisGame(scriptedPieces: [Tetromino.i, Tetromino.o]);
+    game.lines = 9;
+    game.active = game.active!.copyWith(rotation: 1);
+    for (
+      var row = TetrisGame.visibleRows - 4;
+      row < TetrisGame.visibleRows;
+      row += 1
+    ) {
+      _fillVisibleRowExcept(game, row, {5});
+    }
+    final soundEffects = _RecordingSoundEffects();
+
+    await tester.pumpWidget(
+      TetrisApp(enableAudio: false, game: game, soundEffects: soundEffects),
+    );
+    await tester.pump();
+
+    final board = find.byKey(const ValueKey('tetris-board'));
+    await tester.drag(board, const Offset(0, 96));
+    await tester.pump();
+
+    expect(
+      soundEffects.played,
+      containsAll([TetrisSfx.hardDrop, TetrisSfx.tetris, TetrisSfx.levelUp]),
+    );
+    expect(soundEffects.played, isNot(contains(TetrisSfx.clear)));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('plays hard lock sound when lock delay expires', (tester) async {
+    _usePhoneViewport(tester);
+    final game = TetrisGame(scriptedPieces: [Tetromino.o, Tetromino.i]);
+    while (game.softDropStep()) {}
+    final soundEffects = _RecordingSoundEffects();
+
+    await tester.pumpWidget(
+      TetrisApp(enableAudio: false, game: game, soundEffects: soundEffects),
+    );
+    await tester.pump();
+
+    await tester.pump(TetrisGame.lockDelay ~/ 2);
+    await tester.pump(TetrisGame.lockDelay ~/ 2);
+
+    expect(soundEffects.played, contains(TetrisSfx.hardLock));
+    expect(soundEffects.played, isNot(contains(TetrisSfx.hardDrop)));
     expect(tester.takeException(), isNull);
   });
 

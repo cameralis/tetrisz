@@ -27,11 +27,111 @@ const _snapBlockedFraction = 0.22;
 const _boardAspectRatio =
     TetrisGame.width / (TetrisGame.visibleRows + _bufferSliverRows);
 
+enum TetrisSfx {
+  slide('sfx/slide.mp3'),
+  rotate('sfx/rotate.mp3'),
+  counterRotate('sfx/counter_rotate.mp3'),
+  softDrop('sfx/soft_drop.mp3'),
+  hardDrop('sfx/hard_drop.mp3'),
+  hardLock('sfx/hard_lock.mp3'),
+  clear('sfx/clear.mp3'),
+  tetris('sfx/tetris.mp3'),
+  levelUp('sfx/level_up.mp3');
+
+  const TetrisSfx(this.assetPath);
+
+  final String assetPath;
+}
+
+abstract interface class TetrisSoundEffects {
+  void play(TetrisSfx sfx);
+
+  void dispose();
+}
+
+final class NoopTetrisSoundEffects implements TetrisSoundEffects {
+  const NoopTetrisSoundEffects();
+
+  @override
+  void play(TetrisSfx sfx) {}
+
+  @override
+  void dispose() {}
+}
+
+final class AssetTetrisSoundEffects implements TetrisSoundEffects {
+  AssetTetrisSoundEffects({this.volume = 0.65});
+
+  final double volume;
+  final Map<TetrisSfx, Future<AudioPool>> _pools = {};
+
+  @override
+  void play(TetrisSfx sfx) {
+    unawaited(_play(sfx));
+  }
+
+  Future<void> _play(TetrisSfx sfx) async {
+    try {
+      final pool = await _poolFor(sfx);
+      await pool.start(volume: volume);
+    } catch (_) {}
+  }
+
+  Future<AudioPool> _poolFor(TetrisSfx sfx) {
+    return _pools.putIfAbsent(
+      sfx,
+      () => AudioPool.createFromAsset(
+        path: sfx.assetPath,
+        maxPlayers: 4,
+        playerMode: PlayerMode.lowLatency,
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    unawaited(_dispose());
+  }
+
+  Future<void> _dispose() async {
+    try {
+      final pools = await Future.wait(_pools.values);
+      await Future.wait(pools.map((pool) => pool.dispose()));
+    } catch (_) {}
+  }
+}
+
+final class _SoundSnapshot {
+  const _SoundSnapshot({
+    required this.lockCount,
+    required this.lines,
+    required this.level,
+  });
+
+  factory _SoundSnapshot.fromGame(TetrisGame game) {
+    return _SoundSnapshot(
+      lockCount: game.lockCount,
+      lines: game.lines,
+      level: game.level,
+    );
+  }
+
+  final int lockCount;
+  final int lines;
+  final int level;
+}
+
 class TetrisApp extends StatelessWidget {
-  const TetrisApp({super.key, this.enableAudio = true, this.game});
+  const TetrisApp({
+    super.key,
+    this.enableAudio = true,
+    this.game,
+    this.soundEffects,
+  });
 
   final bool enableAudio;
   final TetrisGame? game;
+  final TetrisSoundEffects? soundEffects;
 
   @override
   Widget build(BuildContext context) {
@@ -51,16 +151,26 @@ class TetrisApp extends StatelessWidget {
           displayColor: _text,
         ),
       ),
-      home: TetrisGamePage(enableAudio: enableAudio, game: game),
+      home: TetrisGamePage(
+        enableAudio: enableAudio,
+        game: game,
+        soundEffects: soundEffects,
+      ),
     );
   }
 }
 
 class TetrisGamePage extends StatefulWidget {
-  const TetrisGamePage({super.key, this.enableAudio = true, this.game});
+  const TetrisGamePage({
+    super.key,
+    this.enableAudio = true,
+    this.game,
+    this.soundEffects,
+  });
 
   final bool enableAudio;
   final TetrisGame? game;
+  final TetrisSoundEffects? soundEffects;
 
   @override
   State<TetrisGamePage> createState() => _TetrisGamePageState();
@@ -71,6 +181,8 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   late final TetrisGame _game;
   late final Ticker _ticker;
   late final AnimationController _snapBackController;
+  late final TetrisSoundEffects _soundEffects;
+  late final bool _disposeSoundEffects;
   AudioPlayer? _musicPlayer;
   Timer? _softDropTimer;
 
@@ -92,6 +204,17 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _game = widget.game ?? TetrisGame();
+    final soundEffects = widget.soundEffects;
+    if (soundEffects != null) {
+      _soundEffects = soundEffects;
+      _disposeSoundEffects = false;
+    } else if (widget.enableAudio) {
+      _soundEffects = AssetTetrisSoundEffects();
+      _disposeSoundEffects = true;
+    } else {
+      _soundEffects = const NoopTetrisSoundEffects();
+      _disposeSoundEffects = false;
+    }
     _ticker = createTicker(_onFrame)..start();
     _snapBackController =
         AnimationController(vsync: this, duration: _snapBackDuration)
@@ -115,6 +238,9 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _softDropTimer?.cancel();
     _snapBackController.dispose();
     _ticker.dispose();
+    if (_disposeSoundEffects) {
+      _soundEffects.dispose();
+    }
     unawaited(_musicPlayer?.dispose() ?? Future.value());
     super.dispose();
   }
@@ -140,7 +266,9 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       return;
     }
 
+    final before = _SoundSnapshot.fromGame(_game);
     _game.tick(delta);
+    _playPostActionSfx(before);
     if (mounted) {
       setState(() {});
     }
@@ -175,6 +303,52 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     setState(action);
   }
 
+  T _runGameAction<T>(
+    T Function() action, {
+    TetrisSfx? successSfx,
+    bool Function(T result, _SoundSnapshot before)? didSucceed,
+    bool suppressLockSfx = false,
+  }) {
+    unawaited(_playMusic());
+    final before = _SoundSnapshot.fromGame(_game);
+    late final T result;
+    setState(() {
+      result = action();
+    });
+
+    final succeeded = didSucceed?.call(result, before) ?? true;
+    if (succeeded && successSfx != null) {
+      _playSfx(successSfx);
+    }
+    _playPostActionSfx(before, suppressLockSfx: suppressLockSfx);
+    return result;
+  }
+
+  void _playPostActionSfx(
+    _SoundSnapshot before, {
+    bool suppressLockSfx = false,
+  }) {
+    final locked = _game.lockCount > before.lockCount;
+    if (locked && !suppressLockSfx) {
+      _playSfx(TetrisSfx.hardLock);
+    }
+
+    if (_game.lines > before.lines) {
+      _playSfx(_game.lastClear.lines == 4 ? TetrisSfx.tetris : TetrisSfx.clear);
+    }
+
+    if (_game.level > before.level) {
+      _playSfx(TetrisSfx.levelUp);
+    }
+  }
+
+  void _playSfx(TetrisSfx sfx) {
+    if (!_musicEnabled) {
+      return;
+    }
+    _soundEffects.play(sfx);
+  }
+
   void _restart() {
     _runAction(() {
       _game.restart();
@@ -203,18 +377,51 @@ class _TetrisGamePageState extends State<TetrisGamePage>
 
   void _startSoftDrop() {
     _softDropTimer?.cancel();
-    _runAction(_game.softDropStep);
+    _softDropStep();
     _softDropTimer = Timer.periodic(const Duration(milliseconds: 45), (_) {
       if (!mounted) {
         return;
       }
-      _runAction(_game.softDropStep);
+      _softDropStep();
     });
   }
 
   void _stopSoftDrop() {
     _softDropTimer?.cancel();
     _softDropTimer = null;
+  }
+
+  void _softDropStep() {
+    _runGameAction<bool>(
+      _game.softDropStep,
+      successSfx: TetrisSfx.softDrop,
+      didSucceed: (moved, _) => moved,
+    );
+  }
+
+  void _hardDrop() {
+    _runGameAction<int>(
+      _game.hardDrop,
+      successSfx: TetrisSfx.hardDrop,
+      didSucceed: (_, before) => _game.lockCount > before.lockCount,
+      suppressLockSfx: true,
+    );
+  }
+
+  void _rotateClockwise() {
+    _runGameAction<bool>(
+      _game.rotateClockwise,
+      successSfx: TetrisSfx.rotate,
+      didSucceed: (rotated, _) => rotated,
+    );
+  }
+
+  void _rotateCounterClockwise() {
+    _runGameAction<bool>(
+      _game.rotateCounterClockwise,
+      successSfx: TetrisSfx.counterRotate,
+      didSucceed: (rotated, _) => rotated,
+    );
   }
 
   void _handlePointerDown(PointerDownEvent event) {
@@ -293,6 +500,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     });
 
     if (committedColumns != 0) {
+      _playSfx(TetrisSfx.slide);
       _animateSnapPulseToZero(_snapCommitDuration);
     }
   }
@@ -327,7 +535,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       if (_dragY < 0) {
         _runAction(_game.hold);
       } else {
-        _runAction(_game.hardDrop);
+        _hardDrop();
       }
     } else {
       _animateSnapBack();
@@ -541,10 +749,10 @@ class _TetrisGamePageState extends State<TetrisGamePage>
         const SizedBox(height: 12),
         _ActionPanel(
           onRestart: _restart,
-          onRotateLeft: () => _runAction(_game.rotateCounterClockwise),
-          onRotateRight: () => _runAction(_game.rotateClockwise),
+          onRotateLeft: _rotateCounterClockwise,
+          onRotateRight: _rotateClockwise,
           onHold: () => _runAction(_game.hold),
-          onDrop: () => _runAction(_game.hardDrop),
+          onDrop: _hardDrop,
         ),
       ],
     );
@@ -572,9 +780,9 @@ class _TetrisGamePageState extends State<TetrisGamePage>
               behavior: HitTestBehavior.opaque,
               onTapUp: (details) {
                 if (details.localPosition.dx > constraints.maxWidth / 2) {
-                  _runAction(_game.rotateClockwise);
+                  _rotateClockwise();
                 } else {
-                  _runAction(_game.rotateCounterClockwise);
+                  _rotateCounterClockwise();
                 }
               },
               onLongPressStart: (_) {
