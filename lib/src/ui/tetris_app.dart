@@ -236,28 +236,12 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     }
 
     _snapBackController.stop();
-    var moved = false;
-    var blocked = false;
-
     setState(() {
-      while (_snapDragX.abs() >= snapDistance && !blocked) {
-        final direction = _snapDragX.sign;
-        final didMove = direction < 0 ? _game.moveLeft() : _game.moveRight();
-        if (!didMove) {
-          blocked = true;
-          break;
-        }
-        moved = true;
-        _snapDragX -= snapDistance * direction;
-      }
-
+      final direction = _snapDragX.sign.toInt();
+      final blocked = !_canMoveHorizontally(direction);
       final limit = blocked ? _snapBlockedFraction : _snapCommitFraction;
       _snapVisualOffsetCells = (_snapDragX / cellSize).clamp(-limit, limit);
     });
-
-    if (moved) {
-      unawaited(_playMusic());
-    }
   }
 
   void _handlePointerUp(PointerUpEvent event) {
@@ -289,12 +273,53 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       } else {
         _runAction(_game.hardDrop);
       }
+    } else if (_snapVisualOffsetCells.abs() >= _snapCommitFraction) {
+      _commitHorizontalSnap();
     } else {
       _animateSnapBack();
     }
     _dragX = 0;
     _dragY = 0;
     _snapDragX = 0;
+  }
+
+  void _commitHorizontalSnap() {
+    final direction = _snapVisualOffsetCells.sign.toInt();
+    if (!_canMoveHorizontally(direction)) {
+      _animateSnapBack();
+      return;
+    }
+
+    setState(() {
+      if (direction < 0) {
+        _game.moveLeft();
+      } else {
+        _game.moveRight();
+      }
+      _snapVisualOffsetCells -= direction;
+    });
+    unawaited(_playMusic());
+    _animateSnapBack();
+  }
+
+  bool _canMoveHorizontally(int direction) {
+    if (direction == 0 ||
+        _game.active == null ||
+        _game.gameOver ||
+        _game.paused) {
+      return false;
+    }
+
+    for (final cell in _game.activeCells) {
+      final targetX = cell.x + direction;
+      if (targetX < 0 || targetX >= TetrisGame.width) {
+        return false;
+      }
+      if (_game.cellAt(targetX, cell.y) != null) {
+        return false;
+      }
+    }
+    return true;
   }
 
   void _animateSnapBack() {

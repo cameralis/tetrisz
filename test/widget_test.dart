@@ -216,12 +216,15 @@ void main() {
     await gesture.moveBy(_committingSnapDrag);
     await tester.pump();
 
-    expect(game.active!.x, startX + 1);
+    expect(game.active!.x, startX);
+    expect(_boardActiveHorizontalOffset(tester), greaterThanOrEqualTo(0.69));
 
     await gesture.up();
+    await tester.pump();
     await tester.pump(const Duration(milliseconds: 140));
 
     expect(game.active!.x, startX + 1);
+    expect(_boardActiveHorizontalOffset(tester), 0);
     expect(tester.takeException(), isNull);
   });
 
@@ -240,11 +243,14 @@ void main() {
     await tester.pump();
 
     expect(game.active!.x, wallX);
+    expect(_boardActiveHorizontalOffset(tester), closeTo(-0.22, 0.01));
 
     await gesture.up();
+    await tester.pump();
     await tester.pump(const Duration(milliseconds: 140));
 
     expect(game.active!.x, wallX);
+    expect(_boardActiveHorizontalOffset(tester), 0);
     expect(tester.takeException(), isNull);
   });
 
