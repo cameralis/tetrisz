@@ -292,9 +292,9 @@ void main() {
       final channels = [outline.r, outline.g, outline.b]..sort();
 
       expect(outline.colorSpace, ui.ColorSpace.extendedSRGB, reason: '$type');
-      expect(channels.last, greaterThan(1.5), reason: '$type');
+      expect(channels.last, greaterThan(4), reason: '$type');
       expect(channels.first, lessThan(0.2), reason: '$type');
-      expect(channels.last - channels.first, greaterThan(1.4), reason: '$type');
+      expect(channels.last - channels.first, greaterThan(3.8), reason: '$type');
     }
   });
 

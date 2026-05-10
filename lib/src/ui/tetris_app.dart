@@ -2472,6 +2472,24 @@ void _drawGhost(
     rrect,
     Paint()
       ..style = PaintingStyle.stroke
+      ..strokeWidth = math.max(5.0, cellSize * 0.26)
+      ..strokeJoin = StrokeJoin.round
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, cellSize * 0.16)
+      ..color = outlineColor.withValues(alpha: 0.26),
+  );
+  canvas.drawRRect(
+    rrect,
+    Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = math.max(3.2, cellSize * 0.18)
+      ..strokeJoin = StrokeJoin.round
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, cellSize * 0.075)
+      ..color = outlineColor.withValues(alpha: 0.42),
+  );
+  canvas.drawRRect(
+    rrect,
+    Paint()
+      ..style = PaintingStyle.stroke
       ..strokeWidth = math.max(2.2, cellSize * 0.13)
       ..strokeJoin = StrokeJoin.round
       ..color = outlineColor.withValues(alpha: 0.3),
@@ -2500,50 +2518,50 @@ ui.Color tetrisGhostHdrOutlineColorFor(Tetromino type) {
     Tetromino.i => const ui.Color.from(
       alpha: 1,
       red: 0,
-      green: 0.9,
-      blue: 3.2,
+      green: 1.05,
+      blue: 4.35,
       colorSpace: ui.ColorSpace.extendedSRGB,
     ),
     Tetromino.j => const ui.Color.from(
       alpha: 1,
       red: 0.05,
-      green: 0.16,
-      blue: 3.4,
+      green: 0.18,
+      blue: 4.6,
       colorSpace: ui.ColorSpace.extendedSRGB,
     ),
     Tetromino.l => const ui.Color.from(
       alpha: 1,
-      red: 3.2,
-      green: 0.58,
+      red: 4.5,
+      green: 0.68,
       blue: 0,
       colorSpace: ui.ColorSpace.extendedSRGB,
     ),
     Tetromino.o => const ui.Color.from(
       alpha: 1,
-      red: 3.0,
-      green: 1.85,
+      red: 4.15,
+      green: 2.35,
       blue: 0,
       colorSpace: ui.ColorSpace.extendedSRGB,
     ),
     Tetromino.s => const ui.Color.from(
       alpha: 1,
       red: 0,
-      green: 3.1,
+      green: 4.25,
       blue: 0.08,
       colorSpace: ui.ColorSpace.extendedSRGB,
     ),
     Tetromino.z => const ui.Color.from(
       alpha: 1,
-      red: 3.3,
+      red: 4.55,
       green: 0.02,
       blue: 0.12,
       colorSpace: ui.ColorSpace.extendedSRGB,
     ),
     Tetromino.t => const ui.Color.from(
       alpha: 1,
-      red: 2.25,
+      red: 2.9,
       green: 0,
-      blue: 3.2,
+      blue: 4.35,
       colorSpace: ui.ColorSpace.extendedSRGB,
     ),
   };
