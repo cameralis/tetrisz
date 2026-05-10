@@ -822,10 +822,12 @@ void main() {
 
     final impact = _boardImpactOffset(tester);
     expect(impact.dx, 0);
-    expect(impact.dy, greaterThan(0.3));
+    expect(impact.dy, greaterThan(0.45));
 
     await tester.pump(const Duration(milliseconds: 420));
+    expect(_boardImpactOffset(tester).distance, greaterThan(0.01));
 
+    await tester.pump(const Duration(milliseconds: 420));
     expect(_boardImpactOffset(tester), Offset.zero);
     expect(tester.takeException(), isNull);
   });
@@ -869,6 +871,36 @@ void main() {
     expect(impact.dy, 0);
     await gesture.up();
     await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('holding a wall pull does not restart the side impact', (
+    tester,
+  ) async {
+    _usePhoneViewport(tester);
+    final game = _visiblePieceGame(Tetromino.t);
+    while (game.moveLeft()) {}
+
+    await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
+    await tester.pump();
+
+    final board = find.byKey(const ValueKey('tetris-board'));
+    final gesture = await tester.startGesture(tester.getCenter(board));
+    await gesture.moveBy(-_committingSnapDrag);
+    await tester.pump();
+
+    final initialImpact = _boardImpactOffset(tester);
+    expect(initialImpact.dx, lessThan(-0.25));
+
+    await tester.pump(const Duration(milliseconds: 160));
+    final progressedImpact = _boardImpactOffset(tester);
+    expect(progressedImpact.dx, isNot(closeTo(initialImpact.dx, 0.02)));
+
+    await gesture.moveBy(-_committingSnapDrag);
+    await tester.pump();
+
+    final sustainedImpact = _boardImpactOffset(tester);
+    expect(sustainedImpact.dx, isNot(closeTo(initialImpact.dx, 0.02)));
     expect(tester.takeException(), isNull);
   });
 

@@ -23,9 +23,9 @@ const _snapBackDuration = Duration(milliseconds: 120);
 const _snapCommitDuration = Duration(milliseconds: 64);
 const _lineClearAnimationDuration = Duration(milliseconds: 240);
 const _lineClearDropDelay = Duration(milliseconds: 24);
-const _boardImpactDuration = Duration(milliseconds: 380);
-const _boardImpactDownCells = 0.34;
-const _boardSideImpactCells = 0.2;
+const _boardImpactDuration = Duration(milliseconds: 760);
+const _boardImpactDownCells = 0.5;
+const _boardSideImpactCells = 0.3;
 const _horizontalIntentFraction = 0.35;
 const _minHorizontalIntentDistance = 20.0;
 const _snapPreviewFraction = 0.25;
@@ -340,6 +340,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   bool _musicStarted = false;
   bool _volumePreferencesLoaded = false;
   int _musicTrackIndex = 0;
+  int _wallImpactDirection = 0;
   int _lineClearHiddenColumnCount = 0;
   int _lineClearAnimationSerial = 0;
   double _musicVolume = _defaultMusicVolume;
@@ -672,6 +673,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       _lineClearAnimating = false;
       _lineClearSnapshot = null;
       _lineClearHiddenColumnCount = 0;
+      _wallImpactDirection = 0;
       _boardImpactOffsetCells = Offset.zero;
       _game.restart();
     });
@@ -739,6 +741,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _snapPreviewOffsetCells = 0;
     _snapPulseOffsetCells = 0;
     _snapVisualOffsetCells = 0;
+    _wallImpactDirection = 0;
     _horizontalDragLocked = false;
     unawaited(_playMusic());
   }
@@ -802,12 +805,31 @@ class _TetrisGamePageState extends State<TetrisGamePage>
 
   void _startBoardImpact(Offset impactOffset) {
     _boardImpactController.stop();
-    _boardImpactAnimation = Tween<Offset>(begin: impactOffset, end: Offset.zero)
-        .animate(
-          CurvedAnimation(
-            parent: _boardImpactController,
-            curve: Curves.elasticOut,
+    _boardImpactAnimation =
+        TweenSequence<Offset>([
+          TweenSequenceItem(
+            tween: Tween<Offset>(
+              begin: impactOffset,
+              end: impactOffset * -0.18,
+            ).chain(CurveTween(curve: Curves.easeOutCubic)),
+            weight: 44,
           ),
+          TweenSequenceItem(
+            tween: Tween<Offset>(
+              begin: impactOffset * -0.18,
+              end: impactOffset * 0.08,
+            ).chain(CurveTween(curve: Curves.easeInOutCubic)),
+            weight: 24,
+          ),
+          TweenSequenceItem(
+            tween: Tween<Offset>(
+              begin: impactOffset * 0.08,
+              end: Offset.zero,
+            ).chain(CurveTween(curve: Curves.easeOutCubic)),
+            weight: 32,
+          ),
+        ]).animate(
+          CurvedAnimation(parent: _boardImpactController, curve: Curves.linear),
         );
     setState(() {
       _boardImpactOffsetCells = impactOffset;
@@ -883,13 +905,19 @@ class _TetrisGamePageState extends State<TetrisGamePage>
         pulseDirection = direction;
       }
 
+      if (committedColumns != 0) {
+        _wallImpactDirection = 0;
+      }
+
       final direction = _snapDragX.sign.toInt();
       final blocked = direction != 0 && !_canMoveHorizontally(direction);
       if (blocked) {
         _snapPreviewOffsetCells = _snapBlockedFraction * direction;
         _snapDragX = 0;
-        if (_canTriggerWallImpact(direction)) {
+        if (_canTriggerWallImpact(direction) &&
+            _wallImpactDirection != direction) {
           wallImpactDirection = direction;
+          _wallImpactDirection = direction;
         }
       } else {
         _snapPreviewOffsetCells = _snapPreviewOffsetForDrag(
@@ -931,6 +959,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _dragX = 0;
     _dragY = 0;
     _snapDragX = 0;
+    _wallImpactDirection = 0;
     _horizontalDragLocked = false;
     _dragPointer = null;
   }
@@ -953,6 +982,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _dragX = 0;
     _dragY = 0;
     _snapDragX = 0;
+    _wallImpactDirection = 0;
     _horizontalDragLocked = false;
   }
 
