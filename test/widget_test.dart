@@ -663,6 +663,34 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets(
+    'large horizontal drag plays one slide sound for the move event',
+    (tester) async {
+      _usePhoneViewport(tester);
+      final game = _visiblePieceGame(Tetromino.t);
+      final soundEffects = _RecordingSoundEffects();
+
+      await tester.pumpWidget(
+        TetrisApp(enableAudio: false, game: game, soundEffects: soundEffects),
+      );
+      await tester.pump();
+
+      final board = find.byKey(const ValueKey('tetris-board'));
+      final gesture = await tester.startGesture(tester.getCenter(board));
+      await gesture.moveBy(const Offset(180, 0));
+      await tester.pump();
+      await gesture.up();
+      await tester.pump();
+
+      final slideCount = soundEffects.playedSfx
+          .where((sfx) => sfx == TetrisSfx.slide)
+          .length;
+      expect(game.active!.x, greaterThan(4));
+      expect(slideCount, 1);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('horizontal drag lock prevents hard drop after dragging down', (
     tester,
   ) async {

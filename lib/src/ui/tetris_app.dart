@@ -78,21 +78,15 @@ final class AssetTetrisSoundEffects implements TetrisSoundEffects {
   }
 
   Future<void> _play(TetrisSfx sfx, double volume) async {
-    final gain = volume.clamp(0.0, _maxSfxVolume).toDouble();
-    if (gain <= 0) {
+    final playbackVolume = (volume.clamp(0.0, _maxSfxVolume) / _maxSfxVolume)
+        .toDouble();
+    if (playbackVolume <= 0) {
       return;
     }
 
     try {
       final pool = await _poolFor(sfx);
-      var remainingGain = gain;
-      final starts = <Future<StopFunction>>[];
-      while (remainingGain > 0) {
-        final playerVolume = math.min(1.0, remainingGain).toDouble();
-        starts.add(pool.start(volume: playerVolume));
-        remainingGain -= playerVolume;
-      }
-      await Future.wait(starts);
+      await pool.start(volume: playbackVolume);
     } catch (_) {}
   }
 
@@ -102,7 +96,7 @@ final class AssetTetrisSoundEffects implements TetrisSoundEffects {
       () => AudioPool.createFromAsset(
         path: sfx.assetPath,
         audioCache: _audioCache,
-        maxPlayers: 8,
+        maxPlayers: 4,
       ),
     );
   }
