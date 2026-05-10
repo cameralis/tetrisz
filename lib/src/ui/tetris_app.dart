@@ -35,6 +35,8 @@ const _lineClearSnapParticleSpeed = 0.26;
 const _lineClearSnapParticlesInRow = TetrisGame.width * 5;
 const _lineClearSnapParticlesInColumn = TetrisGame.visibleRows * 5;
 const _lineClearSnapWarmUpSize = Size(320, 640);
+@visibleForTesting
+const tetrisLineClearSnapParticleHdrBoost = 2.8;
 const _horizontalIntentFraction = 0.35;
 const _minHorizontalIntentDistance = 20.0;
 const _snapPreviewFraction = 0.25;
@@ -2116,8 +2118,9 @@ void _configureLineClearSnapShader({
   shader.setFloat(3, _lineClearSnapParticlesInRow.toDouble());
   shader.setFloat(4, _lineClearSnapParticlesInColumn.toDouble());
   shader.setFloat(5, _lineClearSnapParticleSpeed);
-  shader.setFloat(6, size.width);
-  shader.setFloat(7, size.height);
+  shader.setFloat(6, tetrisLineClearSnapParticleHdrBoost);
+  shader.setFloat(7, size.width);
+  shader.setFloat(8, size.height);
   shader.setImageSampler(0, image);
 }
 

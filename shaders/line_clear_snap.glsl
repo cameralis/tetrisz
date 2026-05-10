@@ -16,6 +16,7 @@ uniform float fadeOutDuration;
 uniform float particlesInRow;
 uniform float particlesInColumn;
 uniform float particleSpeed;
+uniform float particleHdrBoost;
 uniform vec2 uSize;
 uniform sampler2D uImageTexture;
 
@@ -28,6 +29,17 @@ float delayForX(float x) {
 float randomAngle(int i) {
   float r = fract(sin(float(i) * 31.415 + 9.73) * 43758.5453);
   return min_movement_angle + floor(r * movement_angles_count) * movement_angle_step;
+}
+
+vec3 hdrParticleColor(vec3 color) {
+  float maxChannel = max(max(color.r, color.g), color.b);
+  if (maxChannel <= 0.0) {
+    return color;
+  }
+
+  vec3 hue = color / maxChannel;
+  vec3 saturatedHue = pow(clamp(hue, 0.0, 1.0), vec3(1.35));
+  return saturatedHue * maxChannel * particleHdrBoost;
 }
 
 int particleIndexFor(vec2 point, float angle, float particleWidth, float particleHeight) {
@@ -74,7 +86,7 @@ void main() {
       vec4 color = texture(uImageTexture, sourceUv);
       float fadeAge = max(0.0, t - (particleLifetime - fadeOutDuration));
       float opacity = max(0.0, 1.0 - fadeAge / fadeOutDuration);
-      fragColor = color * opacity;
+      fragColor = vec4(hdrParticleColor(color.rgb) * opacity, color.a * opacity);
       return;
     }
   }
