@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -775,6 +776,89 @@ void main() {
     expect(find.text('HIGH SCORE'), findsOneWidget);
     expect(find.text(game.score.toString()), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('restores a saved game in a paused state on launch', (
+    tester,
+  ) async {
+    _usePhoneViewport(tester);
+    final source = TetrisGame(seed: 5);
+    source.hardDrop();
+    source.hardDrop();
+    source.moveLeft();
+    source.softDropStep();
+    final savedScore = source.score;
+    expect(savedScore, greaterThan(0));
+    SharedPreferences.setMockInitialValues({
+      tetrisSavedGamePreferenceKey: jsonEncode(source.toJson()),
+    });
+
+    await tester.pumpWidget(const TetrisApp(enableAudio: false));
+    await _flushPreferenceTasks(tester);
+
+    expect(find.text('PAUSED'), findsOneWidget);
+    expect(find.text(savedScore.toString()), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('auto-pauses and saves the game when backgrounded', (
+    tester,
+  ) async {
+    _usePhoneViewport(tester);
+    SharedPreferences.setMockInitialValues({});
+    final game = _visiblePieceGame(Tetromino.t);
+
+    await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
+    await _flushPreferenceTasks(tester);
+
+    await tester.drag(
+      find.byKey(const ValueKey('tetris-board')),
+      const Offset(0, 600),
+    );
+    await tester.pump();
+    expect(game.gameOver, isFalse);
+    final scoreBeforeBackground = game.score;
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await _flushPreferenceTasks(tester);
+
+    expect(game.paused, isTrue);
+    expect(find.text('PAUSED'), findsOneWidget);
+
+    await tester.runAsync(() async {
+      await Future<void>.delayed(Duration.zero);
+      final preferences = await SharedPreferences.getInstance();
+      final saved = preferences.getString(tetrisSavedGamePreferenceKey);
+      expect(saved, isNotNull);
+      final decoded = jsonDecode(saved!) as Map<String, dynamic>;
+      expect(decoded['gameOver'], isFalse);
+      expect(decoded['score'], scoreBeforeBackground);
+    });
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('discards the saved game once the round is over', (tester) async {
+    _usePhoneViewport(tester);
+    final finished = TetrisGame(seed: 3);
+    while (!finished.gameOver) {
+      finished.hardDrop();
+    }
+    SharedPreferences.setMockInitialValues({
+      tetrisSavedGamePreferenceKey: jsonEncode(finished.toJson()),
+    });
+
+    await tester.pumpWidget(const TetrisApp(enableAudio: false));
+    await _flushPreferenceTasks(tester);
+
+    // A finished snapshot must not resume; the player gets a fresh board.
+    expect(find.text('GAME OVER'), findsNothing);
+    expect(tester.takeException(), isNull);
+
+    await tester.runAsync(() async {
+      await Future<void>.delayed(Duration.zero);
+      final preferences = await SharedPreferences.getInstance();
+      expect(preferences.getString(tetrisSavedGamePreferenceKey), isNull);
+    });
   });
 
   testWidgets('music playlist advances in order and wraps to the first track', (

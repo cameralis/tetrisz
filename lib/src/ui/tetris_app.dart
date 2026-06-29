@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -52,6 +53,8 @@ const _musicVolumePreferenceKey = 'tetris.musicVolume';
 const _sfxVolumePreferenceKey = 'tetris.sfxVolume';
 @visibleForTesting
 const tetrisHighScorePreferenceKey = 'tetris.highScore';
+@visibleForTesting
+const tetrisSavedGamePreferenceKey = 'tetris.savedGame';
 const _movementSfxStartGap = Duration(milliseconds: 55);
 const _rotationSfxStartGap = Duration(milliseconds: 35);
 const _boardAspectRatio =
@@ -572,8 +575,27 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       if (_musicVolume > 0 && !_game.paused && !_game.gameOver) {
         unawaited(_playMusic());
       }
+      return;
+    }
+
+    // Leaving the foreground: freeze the round so nothing falls while the
+    // player is away and persist a resumable snapshot to disk.
+    _autoPauseForBackground();
+    unawaited(_persistGameState());
+    unawaited(_musicPlayer?.pause() ?? Future.value());
+  }
+
+  void _autoPauseForBackground() {
+    if (_game.gameOver || _game.paused) {
+      return;
+    }
+    _softDropTimer?.cancel();
+    if (mounted) {
+      setState(() {
+        _game.paused = true;
+      });
     } else {
-      unawaited(_musicPlayer?.pause() ?? Future.value());
+      _game.paused = true;
     }
   }
 
@@ -608,6 +630,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       final musicVolume = preferences.getDouble(_musicVolumePreferenceKey);
       final sfxVolume = preferences.getDouble(_sfxVolumePreferenceKey);
       final highScore = preferences.getInt(tetrisHighScorePreferenceKey);
+      final savedGame = preferences.getString(tetrisSavedGamePreferenceKey);
       if (!mounted) {
         return;
       }
@@ -618,6 +641,11 @@ class _TetrisGamePageState extends State<TetrisGamePage>
         }
         if (sfxVolume != null) {
           _sfxVolume = sfxVolume.clamp(0.0, _maxSfxVolume).toDouble();
+        }
+        // Only adopt a disk snapshot when the host did not inject a specific
+        // game (production always uses the internal game; tests can override).
+        if (savedGame != null && widget.game == null) {
+          _restoreSavedGame(savedGame);
         }
         _highScore = math.max(highScore ?? 0, _game.score);
         _volumePreferencesLoaded = true;
@@ -639,7 +667,8 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     if (!_volumePreferencesLoaded && loading != null) {
       await loading;
     }
-    if (mounted) {
+    // A restored game boots paused; hold the music until the player resumes.
+    if (mounted && !_game.paused && !_game.gameOver) {
       await _playMusic();
     }
   }
@@ -873,6 +902,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       _boardImpactOffsetCells = Offset.zero;
       _game.restart();
     });
+    unawaited(_clearSavedGame());
     unawaited(_restartMusicPlaylist());
   }
 
@@ -938,6 +968,47 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     try {
       final preferences = await SharedPreferences.getInstance();
       await preferences.setInt(tetrisHighScorePreferenceKey, highScore);
+    } catch (_) {}
+  }
+
+  void _restoreSavedGame(String encoded) {
+    try {
+      final json = jsonDecode(encoded) as Map<String, dynamic>;
+      _game.restore(json);
+      if (_game.gameOver) {
+        // A finished round is not worth resuming; start fresh instead.
+        _game.restart();
+        unawaited(_clearSavedGame());
+        return;
+      }
+      // Resume on the player's terms: surface the pause overlay so the round
+      // only continues once they tap resume.
+      _game.paused = true;
+    } catch (_) {
+      // Corrupt or incompatible snapshot: discard it and keep the fresh game.
+      _game.restart();
+      unawaited(_clearSavedGame());
+    }
+  }
+
+  Future<void> _persistGameState() async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      if (_game.gameOver) {
+        await preferences.remove(tetrisSavedGamePreferenceKey);
+        return;
+      }
+      await preferences.setString(
+        tetrisSavedGamePreferenceKey,
+        jsonEncode(_game.toJson()),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _clearSavedGame() async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.remove(tetrisSavedGamePreferenceKey);
     } catch (_) {}
   }
 

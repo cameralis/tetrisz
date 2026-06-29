@@ -72,6 +72,7 @@ final class TetrisGame {
   static const previewCount = 6;
   static const lockDelay = Duration(milliseconds: 500);
   static const moveResetLimit = 15;
+  static const _saveVersion = 1;
 
   static const _gravityFramesByLevel = <int>[
     48,
@@ -212,6 +213,114 @@ final class TetrisGame {
     lastLineClearSnapshot = null;
     _ensureQueue();
     _spawnNext();
+  }
+
+  /// Serializes the full playable state so it can be written to disk and
+  /// restored later with [restore]. The active piece, board, queue, hold slot
+  /// and all scoring/lock timing are captured; transient animation snapshots
+  /// are intentionally omitted.
+  Map<String, dynamic> toJson() {
+    return {
+      'version': _saveVersion,
+      'board': [
+        for (final row in _board) [for (final cell in row) cell?.index ?? -1],
+      ],
+      'bag': [for (final type in _bag) type.index],
+      'queue': [for (final type in _queue) type.index],
+      'scriptedIndex': _scriptedIndex,
+      'active': active == null
+          ? null
+          : {
+              'type': active!.type.index,
+              'rotation': active!.rotation,
+              'x': active!.x,
+              'y': active!.y,
+            },
+      'holdPiece': holdPiece?.index,
+      'canHold': canHold,
+      'gameOver': gameOver,
+      'paused': paused,
+      'score': score,
+      'level': level,
+      'lines': lines,
+      'lockCount': lockCount,
+      'combo': combo,
+      'backToBack': backToBack,
+      'fallAccumulatorUs': _fallAccumulator.inMicroseconds,
+      'lockElapsedUs': _lockElapsed.inMicroseconds,
+      'lockResetCount': _lockResetCount,
+      'lastActionWasRotation': _lastActionWasRotation,
+    };
+  }
+
+  /// Restores state previously produced by [toJson]. Throws a [FormatException]
+  /// when the payload is missing required fields or has incompatible
+  /// dimensions; callers should fall back to [restart] on failure.
+  void restore(Map<String, dynamic> json) {
+    if (json['version'] != _saveVersion) {
+      throw const FormatException('Unsupported saved game version');
+    }
+
+    final boardJson = (json['board'] as List?)?.cast<List>();
+    if (boardJson == null || boardJson.length != totalRows) {
+      throw const FormatException('Saved board has the wrong height');
+    }
+    final board = <List<Tetromino?>>[];
+    for (final rowJson in boardJson) {
+      if (rowJson.length != width) {
+        throw const FormatException('Saved board has the wrong width');
+      }
+      board.add([for (final cell in rowJson) _tetrominoFromIndex(cell as int)]);
+    }
+
+    _board = board;
+    _bag
+      ..clear()
+      ..addAll([
+        for (final index in (json['bag'] as List)) Tetromino.values[index as int],
+      ]);
+    _queue
+      ..clear()
+      ..addAll([
+        for (final index in (json['queue'] as List))
+          Tetromino.values[index as int],
+      ]);
+    _scriptedIndex = json['scriptedIndex'] as int? ?? _scriptedPieces.length;
+
+    final activeJson = json['active'] as Map?;
+    active = activeJson == null
+        ? null
+        : ActivePiece(
+            type: Tetromino.values[activeJson['type'] as int],
+            rotation: activeJson['rotation'] as int,
+            x: activeJson['x'] as int,
+            y: activeJson['y'] as int,
+          );
+    holdPiece = _tetrominoFromIndex(json['holdPiece'] as int? ?? -1);
+    canHold = json['canHold'] as bool? ?? true;
+    gameOver = json['gameOver'] as bool? ?? false;
+    paused = json['paused'] as bool? ?? false;
+    score = json['score'] as int? ?? 0;
+    level = json['level'] as int? ?? 1;
+    lines = json['lines'] as int? ?? 0;
+    lockCount = json['lockCount'] as int? ?? 0;
+    combo = json['combo'] as int? ?? -1;
+    backToBack = json['backToBack'] as bool? ?? false;
+    _fallAccumulator = Duration(
+      microseconds: json['fallAccumulatorUs'] as int? ?? 0,
+    );
+    _lockElapsed = Duration(microseconds: json['lockElapsedUs'] as int? ?? 0);
+    _lockResetCount = json['lockResetCount'] as int? ?? 0;
+    _lastActionWasRotation = json['lastActionWasRotation'] as bool? ?? false;
+    lastClear = LineClearResult.none;
+    lastLineClearSnapshot = null;
+  }
+
+  static Tetromino? _tetrominoFromIndex(int index) {
+    if (index < 0 || index >= Tetromino.values.length) {
+      return null;
+    }
+    return Tetromino.values[index];
   }
 
   void tick(Duration elapsed) {
