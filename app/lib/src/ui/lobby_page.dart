@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../net/protocol.dart';
 import '../net/room_client.dart';
+import '../net/rtc_session.dart';
 import '../net/versus_session.dart';
 import 'tetris_app.dart';
 
@@ -126,6 +127,9 @@ class _LobbyPageState extends State<LobbyPage> {
           start: envelope,
           isHost: _isHost,
         );
+        // Kick off WebRTC negotiation; the match starts on relay and
+        // promotes to P2P the moment the data channel opens.
+        VersusRtcCoordinator(session);
         Navigator.of(context).pushReplacement(
           MaterialPageRoute<void>(
             builder: (_) => TetrisGamePage(
