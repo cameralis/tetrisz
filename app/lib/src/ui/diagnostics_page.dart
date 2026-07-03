@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import '../net/net_config.dart';
+import '../net/rtc_session.dart';
 
 const _textColor = Color(0xFFF3F6FA);
 const _mutedTextColor = Color(0xFFA5ADBA);
@@ -27,11 +28,38 @@ enum _ProbeState { idle, running, ok, failed }
 class _DiagnosticsPageState extends State<DiagnosticsPage> {
   _ProbeState _backendState = _ProbeState.idle;
   String _backendDetail = 'Not checked yet';
+  _ProbeState _stunState = _ProbeState.idle;
+  String _stunDetail = 'Not checked yet';
 
   @override
   void initState() {
     super.initState();
     unawaited(_probeBackend());
+    unawaited(_probeP2p());
+  }
+
+  Future<void> _probeP2p() async {
+    setState(() {
+      _stunState = _ProbeState.running;
+      _stunDetail = 'Gathering ICE candidates…';
+    });
+    final result = await probeStun();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      if (result.srflxFound) {
+        _stunState = _ProbeState.ok;
+        _stunDetail =
+            'P2P likely available · candidates: '
+            '${result.candidateTypes.join(', ')}';
+      } else {
+        _stunState = _ProbeState.failed;
+        _stunDetail =
+            'Relay-only likely — ${result.error ?? 'no STUN response'}'
+            '${result.candidateTypes.isEmpty ? '' : ' · candidates: ${result.candidateTypes.join(', ')}'}';
+      }
+    });
   }
 
   Future<void> _probeBackend() async {
@@ -107,14 +135,13 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
     );
   }
 
-  /// The WebRTC STUN probe ships with the P2P transport slice; until then
-  /// the section explains what will appear here.
   List<Widget> _buildP2pSection() {
-    return const [
-      _InfoTile(
+    return [
+      _DiagnosticTile(
         title: 'Direct P2P availability',
-        body: 'The STUN reachability probe appears here once WebRTC support '
-            'is enabled in this build.',
+        subtitle: _stunDetail,
+        state: _stunState,
+        onRetry: _probeP2p,
       ),
     ];
   }
