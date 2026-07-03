@@ -5,7 +5,7 @@
 /// The default points at the production Cloudflare Worker.
 const String backendBaseUrl = String.fromEnvironment(
   'TETRIS_BACKEND_URL',
-  defaultValue: 'https://tetrisz-backend.szabi.workers.dev',
+  defaultValue: 'https://tetrisz-backend.unknown9806.workers.dev',
 );
 
 Uri backendHttpUri(String path) {

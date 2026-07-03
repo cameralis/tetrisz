@@ -44,3 +44,14 @@
 - `fvm flutter build web`
 - `fvm flutter run -d 097A87F7-D9B9-40D7-93D2-FCDE71516CF8 --debug`
 - iOS simulator screenshot: `/tmp/tetris-ios-sim-final.png`
+
+6. [x] 1v1 online multiplayer (monorepo: `backend/` Cloudflare Worker + DOs)
+   - [x] Engine: garbage queue, bottom-insert rows with per-chunk hole, attack table (B2B/combo/PC), cancel-then-send, drainable event stream, seed-isolated garbage RNG.
+   - [x] Backend: RoomDO per room code — pairing, shared seed issuance, WebRTC signaling passthrough, opaque relay fallback, rematch handshake, expiry alarms (WebSocket Hibernation API).
+   - [x] Net layer: RoomClient (reconnect + buffering + RTT), game protocol with seq dedup, RelayTransport + P2pTransport + FailoverTransport (promote/demote), VersusSession orchestrator.
+   - [x] WebRTC: host-offers data channel, STUN only (relay IS the fallback; no TURN), ICE-state driven failover.
+   - [x] UI: Home menu, lobby (create/join by code), opponent board mirror, garbage meter, transport chip, countdown + win/lose/rematch overlays; versus disables pause/persistence/high score.
+   - [x] Diagnostics page: backend reachability + STUN probe ("P2P likely available" / "relay-only likely").
+   - [x] Global leaderboard: LeaderboardDO (best per name, top 100), auto-submit on solo game over, leaderboard page with display name.
+   - [x] iOS: Podfile/deployment target 14.0, WebRTC usage-description strings.
+   - [x] Verification: engine + net unit tests, backend vitest in workerd, live e2e (`app/test_live/`) against local wrangler dev AND deployed production worker.

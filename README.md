@@ -1,11 +1,13 @@
 # Tetris
 
-Guideline-style Tetris with 1v1 online multiplayer (WebRTC P2P with backend relay fallback).
+Guideline-style Tetris with 1v1 online multiplayer (WebRTC P2P with backend relay fallback) and a global leaderboard.
 
 ## Structure
 
 - `app/` — Flutter app (iOS primary target, Android/web/macOS also build). Pure-Dart game engine in `app/lib/src/game/`, networking in `app/lib/src/net/`, UI in `app/lib/src/ui/`.
-- `backend/` — Cloudflare Worker + Durable Object (TypeScript, pnpm, wrangler). One Durable Object per room code: WebRTC signaling, shared-seed issuance, and relay fallback transport.
+- `backend/` — Cloudflare Worker + Durable Objects (TypeScript, pnpm, wrangler). One `RoomDO` per room code: WebRTC signaling, shared-seed issuance, and relay fallback transport. One global `LeaderboardDO`: best-score-per-name top list (honest-client model — scores are self-reported by the app).
+
+Production backend: `https://tetrisz-backend.unknown9806.workers.dev` (baked into the app as the `TETRIS_BACKEND_URL` default).
 
 ## Development
 
@@ -37,3 +39,9 @@ pnpm deploy     # wrangler deploy (needs Cloudflare auth)
 5. Both tabs count down and start with identical piece sequences; clears send garbage across.
 
 The multiplayer transport starts on relay and promotes to P2P when the WebRTC data channel opens (visible in the in-game transport chip and on the Settings & Diagnostics page).
+
+There is also a headless end-to-end suite that plays a full match (attack, garbage, win, rematch) over a real backend:
+
+```sh
+cd app && fvm flutter test test_live --dart-define=TETRIS_BACKEND_URL=http://localhost:8787
+```

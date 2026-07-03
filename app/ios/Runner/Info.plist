@@ -14,6 +14,10 @@
 	<true/>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSCameraUsageDescription</key>
+	<string>Not used by this app; declared because the WebRTC networking library links camera APIs.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Not used by this app; declared because the WebRTC networking library links microphone APIs.</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
