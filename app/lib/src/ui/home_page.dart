@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'diagnostics_page.dart';
+import 'leaderboard_page.dart';
 import 'lobby_page.dart';
 import 'tetris_app.dart';
 
@@ -99,6 +100,27 @@ class HomePage extends StatelessWidget {
                     ),
                     child: const Text(
                       '1v1 Versus',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  OutlinedButton(
+                    key: const ValueKey('home-leaderboard'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _textColor,
+                      side: const BorderSide(color: Color(0x33FFFFFF)),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const LeaderboardPage(),
+                      ),
+                    ),
+                    child: const Text(
+                      'Leaderboard',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w700,

@@ -1,9 +1,11 @@
+import { LeaderboardDO } from "./leaderboard";
 import { RoomDO } from "./room";
 
-export { RoomDO };
+export { LeaderboardDO, RoomDO };
 
 export interface Env {
   ROOM: DurableObjectNamespace;
+  LEADERBOARD: DurableObjectNamespace;
 }
 
 // No 0/O or 1/I so codes survive being read aloud.
@@ -22,6 +24,14 @@ function json(data: unknown, status = 200): Response {
     status,
     headers: { "Content-Type": "application/json", ...CORS_HEADERS },
   });
+}
+
+function withCors(response: Response): Response {
+  const wrapped = new Response(response.body, response);
+  for (const [key, value] of Object.entries(CORS_HEADERS)) {
+    wrapped.headers.set(key, value);
+  }
+  return wrapped;
 }
 
 function generateCode(): string {
@@ -44,6 +54,21 @@ export default {
 
     if (url.pathname === "/api/health") {
       return json({ ok: true, now: Date.now() });
+    }
+
+    if (url.pathname === "/api/leaderboard") {
+      const stub = env.LEADERBOARD.get(env.LEADERBOARD.idFromName("global"));
+      if (request.method === "GET") {
+        const response = await stub.fetch("https://leaderboard/list");
+        return withCors(response);
+      }
+      if (request.method === "POST") {
+        const response = await stub.fetch("https://leaderboard/submit", {
+          method: "POST",
+          body: await request.text(),
+        });
+        return withCors(response);
+      }
     }
 
     if (url.pathname === "/api/rooms" && request.method === "POST") {

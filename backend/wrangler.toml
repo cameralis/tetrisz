@@ -6,9 +6,17 @@ compatibility_date = "2025-12-01"
 name = "ROOM"
 class_name = "RoomDO"
 
+[[durable_objects.bindings]]
+name = "LEADERBOARD"
+class_name = "LeaderboardDO"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["RoomDO"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["LeaderboardDO"]
 
 [observability]
 enabled = true

@@ -11,9 +11,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../game/tetris_game.dart';
 import '../game/tetromino.dart';
+import '../net/leaderboard_client.dart';
 import '../net/versus_session.dart';
 import 'board_painting.dart';
 import 'home_page.dart';
+import 'leaderboard_page.dart';
 import 'versus_widgets.dart';
 
 const _boardBack = Color(0xFF07080A);
@@ -407,6 +409,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   ui.FragmentShader? _lineClearSnapShader;
   ui.Image? _lineClearSnapImage;
   bool _lineClearSnapWarmUpComplete = false;
+  bool _leaderboardSubmitted = false;
 
   bool get _boardAcceptsInput =>
       !_game.paused && !_game.gameOver && !_lineClearAnimating;
@@ -665,6 +668,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     // Versus event drain runs every frame, even while the board is paused or
     // animating, so attacks and game-over reach the opponent immediately.
     widget.versusSession?.onLocalTick();
+    _maybeSubmitLeaderboardScore();
     if (delta <= Duration.zero ||
         delta > _maxTickDelta ||
         _game.paused ||
@@ -966,6 +970,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       _lineClearSnapshot = null;
       _dragWallImpactMask = 0;
       _boardImpactOffsetCells = Offset.zero;
+      _leaderboardSubmitted = false;
       _game.restart();
     });
     unawaited(_clearSavedGame());
@@ -1022,6 +1027,44 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       final preferences = await SharedPreferences.getInstance();
       await preferences.setDouble(key, volume);
     } catch (_) {}
+  }
+
+  /// Fire-and-forget submission of a finished single-player round to the
+  /// global leaderboard, once per round and only when a display name is set.
+  void _maybeSubmitLeaderboardScore() {
+    if (widget.versusSession != null ||
+        !_game.gameOver ||
+        _leaderboardSubmitted ||
+        _game.score <= 0) {
+      return;
+    }
+    _leaderboardSubmitted = true;
+    final score = _game.score;
+    final lines = _game.lines;
+    final level = _game.level;
+    unawaited(() async {
+      try {
+        final preferences = await SharedPreferences.getInstance();
+        final name =
+            preferences.getString(tetrisPlayerNamePreferenceKey)?.trim() ?? '';
+        if (name.isEmpty) {
+          return;
+        }
+        final client = LeaderboardClient();
+        try {
+          await client.submit(
+            name: name,
+            score: score,
+            lines: lines,
+            level: level,
+          );
+        } finally {
+          client.close();
+        }
+      } catch (_) {
+        // Leaderboard submission is best-effort; the game result stands.
+      }
+    }());
   }
 
   void _recordHighScoreIfNeeded() {
