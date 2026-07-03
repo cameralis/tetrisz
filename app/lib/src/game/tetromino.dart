@@ -5,7 +5,13 @@ enum Tetromino {
   o,
   s,
   z,
-  t;
+  t,
+  // Locked garbage cells only; never spawns as an active piece. Keep last so
+  // index-based save files stay valid.
+  garbage;
+
+  /// The seven pieces the 7-bag draws from; excludes [garbage].
+  static const List<Tetromino> playablePieces = [i, j, l, o, s, z, t];
 
   String get label => switch (this) {
     Tetromino.i => 'I',
@@ -15,6 +21,7 @@ enum Tetromino {
     Tetromino.s => 'S',
     Tetromino.z => 'Z',
     Tetromino.t => 'T',
+    Tetromino.garbage => 'X',
   };
 }
 
@@ -86,6 +93,7 @@ List<GridPoint> tetrominoCells(Tetromino type, int rotation) {
     Tetromino.s => _sCells[state],
     Tetromino.z => _zCells[state],
     Tetromino.t => _tCells[state],
+    Tetromino.garbage => const [],
   };
 }
 

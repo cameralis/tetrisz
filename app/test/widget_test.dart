@@ -296,7 +296,9 @@ void main() {
   });
 
   test('ghost landing outline uses mixed extended HDR colors', () {
-    for (final type in Tetromino.values) {
+    // Garbage is excluded: it never spawns as an active piece, so it has no
+    // ghost outline.
+    for (final type in Tetromino.playablePieces) {
       final outline = tetrisGhostHdrOutlineColorFor(type);
       final channels = [outline.r, outline.g, outline.b]..sort();
 

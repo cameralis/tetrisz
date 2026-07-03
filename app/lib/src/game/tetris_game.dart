@@ -1,6 +1,9 @@
 import 'dart:math';
 
+import 'tetris_events.dart';
 import 'tetromino.dart';
+
+export 'tetris_events.dart';
 
 final class LineClearResult {
   const LineClearResult({
@@ -61,6 +64,10 @@ final class LineClearAnimationSnapshot {
 final class TetrisGame {
   TetrisGame({int? seed, List<Tetromino> scriptedPieces = const []})
     : _random = Random(seed),
+      // Garbage holes must never consume _random: the bag shuffle sequence has
+      // to stay identical across two same-seed games even when only one of
+      // them receives garbage.
+      _garbageRandom = Random(seed == null ? null : seed ^ 0x6b8b4567),
       _scriptedPieces = List.of(scriptedPieces) {
     restart();
   }
@@ -72,7 +79,9 @@ final class TetrisGame {
   static const previewCount = 6;
   static const lockDelay = Duration(milliseconds: 500);
   static const moveResetLimit = 15;
+  static const maxGarbagePerLock = 8;
   static const _saveVersion = 1;
+  static const _maxBufferedEvents = 64;
 
   static const _gravityFramesByLevel = <int>[
     48,
@@ -103,10 +112,14 @@ final class TetrisGame {
   ];
 
   final Random _random;
+  final Random _garbageRandom;
   final List<Tetromino> _scriptedPieces;
   late List<List<Tetromino?>> _board;
   final List<Tetromino> _bag = [];
   final List<Tetromino> _queue = [];
+  // Incoming attack chunks (line counts) waiting to be applied to the board.
+  final List<int> _pendingGarbage = [];
+  final List<TetrisEvent> _events = [];
 
   int _scriptedIndex = 0;
   Duration _fallAccumulator = Duration.zero;
@@ -136,6 +149,58 @@ final class TetrisGame {
 
   List<Tetromino> get nextQueue {
     return List.unmodifiable(_queue.take(previewCount));
+  }
+
+  /// Total incoming garbage lines waiting to be applied to the board.
+  int get pendingGarbageLines =>
+      _pendingGarbage.fold(0, (sum, lines) => sum + lines);
+
+  /// Queues an incoming attack. Lines are applied to the bottom of the board
+  /// the next time a piece locks without clearing, and can be cancelled by
+  /// this player's own clears before that.
+  void enqueueGarbage(int lines) {
+    if (gameOver || lines <= 0) {
+      return;
+    }
+    _pendingGarbage.add(lines);
+  }
+
+  /// Returns and clears the buffered [TetrisEvent]s emitted since the last
+  /// drain. Callers that ignore events (single-player) never need this; the
+  /// buffer is capped so it cannot grow unbounded.
+  List<TetrisEvent> drainEvents() {
+    final drained = List<TetrisEvent>.unmodifiable(_events);
+    _events.clear();
+    return drained;
+  }
+
+  /// Garbage lines a clear sends in versus play, before cancellation against
+  /// the receiver's own pending queue. [combo] is the engine's combo counter
+  /// at the time of the clear (0 = first clear in a chain).
+  static int attackForClear(LineClearResult clear, int combo) {
+    if (clear.lines == 0) {
+      return 0;
+    }
+    var attack = clear.tSpin
+        ? switch (clear.lines) { 1 => 2, 2 => 4, _ => 6 }
+        : switch (clear.lines) { 1 => 0, 2 => 1, 3 => 2, _ => 4 };
+    if (clear.backToBack) {
+      attack += 1;
+    }
+    attack += _comboAttackBonus[combo.clamp(0, _comboAttackBonus.length - 1)];
+    if (clear.perfectClear) {
+      attack += 10;
+    }
+    return attack;
+  }
+
+  static const _comboAttackBonus = [0, 0, 1, 1, 1, 2, 2, 3, 3, 4, 4, 5];
+
+  void _emit(TetrisEvent event) {
+    if (_events.length >= _maxBufferedEvents) {
+      _events.removeAt(0);
+    }
+    _events.add(event);
   }
 
   Iterable<MinoCell> get activeCells => active?.cells ?? const [];
@@ -211,6 +276,8 @@ final class TetrisGame {
     backToBack = false;
     lastClear = LineClearResult.none;
     lastLineClearSnapshot = null;
+    _pendingGarbage.clear();
+    _events.clear();
     _ensureQueue();
     _spawnNext();
   }
@@ -250,6 +317,7 @@ final class TetrisGame {
       'lockElapsedUs': _lockElapsed.inMicroseconds,
       'lockResetCount': _lockResetCount,
       'lastActionWasRotation': _lastActionWasRotation,
+      'pendingGarbage': List<int>.of(_pendingGarbage),
     };
   }
 
@@ -312,6 +380,13 @@ final class TetrisGame {
     _lockElapsed = Duration(microseconds: json['lockElapsedUs'] as int? ?? 0);
     _lockResetCount = json['lockResetCount'] as int? ?? 0;
     _lastActionWasRotation = json['lastActionWasRotation'] as bool? ?? false;
+    _pendingGarbage
+      ..clear()
+      ..addAll([
+        for (final lines in (json['pendingGarbage'] as List? ?? const []))
+          lines as int,
+      ]);
+    _events.clear();
     lastClear = LineClearResult.none;
     lastLineClearSnapshot = null;
   }
@@ -508,6 +583,7 @@ final class TetrisGame {
       if (cell.y < 0 || cell.y >= totalRows) {
         gameOver = true;
         active = null;
+        _emit(const ToppedOutEvent());
         return;
       }
       _board[cell.y][cell.x] = cell.type;
@@ -525,10 +601,37 @@ final class TetrisGame {
     final perfectClear = cleared > 0 && _isBoardEmpty;
     _applyScoring(cleared, tSpin: tSpin, perfectClear: perfectClear);
 
+    if (cleared > 0) {
+      final attack = attackForClear(lastClear, combo);
+      final remaining = _cancelPendingGarbage(attack);
+      _emit(
+        LinesClearedEvent(
+          clear: lastClear,
+          attackSent: remaining,
+          garbageCancelled: attack - remaining,
+        ),
+      );
+    } else {
+      _emit(const PieceLockedEvent());
+    }
+
     if (locksCompletelyAboveVisible) {
       gameOver = true;
       active = null;
+      _emit(const ToppedOutEvent());
       return;
+    }
+
+    if (cleared == 0 && _pendingGarbage.isNotEmpty) {
+      final applied = _applyPendingGarbageRows();
+      if (applied > 0) {
+        _emit(GarbageAppliedEvent(lines: applied));
+      }
+      if (gameOver) {
+        active = null;
+        _emit(const ToppedOutEvent());
+        return;
+      }
     }
 
     canHold = true;
@@ -537,6 +640,57 @@ final class TetrisGame {
     _lockResetCount = 0;
     _lastActionWasRotation = false;
     _spawnNext();
+  }
+
+  /// Consumes pending garbage chunks against an outgoing [attack]; returns
+  /// the attack lines left over to send to the opponent.
+  int _cancelPendingGarbage(int attack) {
+    var remaining = attack;
+    while (remaining > 0 && _pendingGarbage.isNotEmpty) {
+      if (_pendingGarbage.first <= remaining) {
+        remaining -= _pendingGarbage.removeAt(0);
+      } else {
+        _pendingGarbage.first -= remaining;
+        remaining = 0;
+      }
+    }
+    return remaining;
+  }
+
+  /// Inserts pending garbage rows at the bottom of the board (shifting the
+  /// stack up), at most [maxGarbagePerLock] lines per lock; the remainder
+  /// stays queued. Each chunk gets a single hole column. Sets [gameOver] when
+  /// the displaced stack would be pushed out of the top of the matrix.
+  int _applyPendingGarbageRows() {
+    var applied = 0;
+    while (_pendingGarbage.isNotEmpty && applied < maxGarbagePerLock) {
+      final chunk = min(_pendingGarbage.first, maxGarbagePerLock - applied);
+      if (chunk <= 0) {
+        break;
+      }
+      if (_pendingGarbage.first <= chunk) {
+        _pendingGarbage.removeAt(0);
+      } else {
+        _pendingGarbage.first -= chunk;
+      }
+
+      final hole = _garbageRandom.nextInt(width);
+      for (var i = 0; i < chunk; i += 1) {
+        if (_board.first.any((cell) => cell != null)) {
+          gameOver = true;
+          return applied;
+        }
+        _board.removeAt(0);
+        _board.add(
+          List<Tetromino?>.generate(
+            width,
+            (x) => x == hole ? null : Tetromino.garbage,
+          ),
+        );
+        applied += 1;
+      }
+    }
+    return applied;
   }
 
   int _clearLines() {
@@ -691,6 +845,7 @@ final class TetrisGame {
     if (!_canPlace(piece)) {
       gameOver = true;
       active = null;
+      _emit(const ToppedOutEvent());
     }
   }
 
@@ -724,7 +879,7 @@ final class TetrisGame {
       }
 
       if (_bag.isEmpty) {
-        _bag.addAll(Tetromino.values);
+        _bag.addAll(Tetromino.playablePieces);
         _bag.shuffle(_random);
       }
       _queue.add(_bag.removeLast());

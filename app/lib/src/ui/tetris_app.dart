@@ -532,7 +532,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
         cellSize,
         x,
         bottom,
-        Tetromino.values[x % Tetromino.values.length],
+        Tetromino.playablePieces[x % Tetromino.playablePieces.length],
       );
     }
 
@@ -2485,6 +2485,15 @@ ui.Color tetrisGhostHdrOutlineColorFor(Tetromino type) {
       blue: 3.55,
       colorSpace: ui.ColorSpace.extendedSRGB,
     ),
+    // Garbage never becomes an active piece, so it never gets a ghost; a
+    // neutral gray keeps the switch exhaustive.
+    Tetromino.garbage => const ui.Color.from(
+      alpha: 1,
+      red: 0.9,
+      green: 0.95,
+      blue: 1.05,
+      colorSpace: ui.ColorSpace.extendedSRGB,
+    ),
   };
 }
 
@@ -2497,5 +2506,6 @@ Color _colorFor(Tetromino type) {
     Tetromino.s => const Color(0xFF58D957),
     Tetromino.z => const Color(0xFFFF4D5E),
     Tetromino.t => const Color(0xFFD85BFF),
+    Tetromino.garbage => const Color(0xFF7A8291),
   };
 }

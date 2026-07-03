@@ -30,7 +30,7 @@ void main() {
       }
 
       expect(seen, hasLength(7));
-      expect(seen, containsAll(Tetromino.values));
+      expect(seen, containsAll(Tetromino.playablePieces));
     });
 
     test('rotates with SRS wall kicks at the left wall', () {
@@ -198,6 +198,219 @@ void main() {
       final json = game.toJson()..['board'] = <List<int>>[];
 
       expect(() => game.restore(json), throwsFormatException);
+    });
+  });
+
+  group('versus mechanics', () {
+    /// Fills the bottom [rows] visible rows, leaving [holeX] empty in each.
+    void fillBottomRows(TetrisGame game, int rows, {required int holeX}) {
+      for (var i = 0; i < rows; i += 1) {
+        final y = TetrisGame.visibleRows - 1 - i;
+        for (var x = 0; x < TetrisGame.width; x += 1) {
+          if (x != holeX) {
+            game.setVisibleCell(x, y, Tetromino.z);
+          }
+        }
+      }
+    }
+
+    test('the bag never deals garbage', () {
+      final game = TetrisGame(seed: 7);
+      var sampled = 0;
+      for (var i = 0; i < 30 && !game.gameOver; i += 1) {
+        expect(Tetromino.playablePieces, contains(game.active!.type));
+        sampled += 1;
+        game.hardDrop();
+      }
+      // Enough draws to cross bag refill boundaries (the queue itself holds
+      // seven pieces beyond these samples).
+      expect(sampled, greaterThanOrEqualTo(8));
+    });
+
+    test('applies queued garbage on a non-clearing lock with one hole', () {
+      final game = TetrisGame(seed: 1, scriptedPieces: [
+        Tetromino.o,
+        Tetromino.o,
+      ]);
+      game.enqueueGarbage(2);
+      expect(game.pendingGarbageLines, 2);
+
+      game.hardDrop();
+
+      expect(game.pendingGarbageLines, 0);
+      for (final visibleY in [
+        TetrisGame.visibleRows - 1,
+        TetrisGame.visibleRows - 2,
+      ]) {
+        final holes = <int>[];
+        for (var x = 0; x < TetrisGame.width; x += 1) {
+          final cell = game.visibleCellAt(x, visibleY);
+          if (cell == null) {
+            holes.add(x);
+          } else {
+            expect(cell, Tetromino.garbage);
+          }
+        }
+        expect(holes, hasLength(1));
+      }
+      // Same chunk shares one hole column.
+      final holeBottom = List.generate(
+        TetrisGame.width,
+        (x) => game.visibleCellAt(x, TetrisGame.visibleRows - 1),
+      ).indexOf(null);
+      final holeAbove = List.generate(
+        TetrisGame.width,
+        (x) => game.visibleCellAt(x, TetrisGame.visibleRows - 2),
+      ).indexOf(null);
+      expect(holeBottom, holeAbove);
+      // The locked O piece was pushed up by two rows.
+      expect(
+        game
+            .drainEvents()
+            .whereType<GarbageAppliedEvent>()
+            .single
+            .lines,
+        2,
+      );
+    });
+
+    test('clears cancel pending garbage before sending an attack', () {
+      final game = TetrisGame(scriptedPieces: [Tetromino.i, Tetromino.o]);
+      fillBottomRows(game, 4, holeX: 0);
+      // A stray block above the cleared rows keeps this from being a
+      // perfect clear (which would add +10 attack).
+      game.setVisibleCell(5, TetrisGame.visibleRows - 5, Tetromino.z);
+      game.enqueueGarbage(3);
+
+      game.rotateClockwise();
+      while (game.moveLeft()) {}
+      game.hardDrop();
+
+      expect(game.lastClear.lines, 4);
+      expect(game.pendingGarbageLines, 0);
+      final event =
+          game.drainEvents().whereType<LinesClearedEvent>().single;
+      expect(event.garbageCancelled, 3);
+      expect(event.attackSent, 1);
+      // No garbage rows were inserted, because the lock cleared lines.
+      expect(
+        game.visibleCellAt(0, TetrisGame.visibleRows - 1),
+        isNot(Tetromino.garbage),
+      );
+    });
+
+    test('caps garbage application per lock and keeps the remainder', () {
+      final game = TetrisGame(seed: 1, scriptedPieces: [
+        Tetromino.o,
+        Tetromino.o,
+        Tetromino.o,
+      ]);
+      game.enqueueGarbage(6);
+      game.enqueueGarbage(5);
+
+      game.hardDrop();
+
+      expect(game.pendingGarbageLines, 3);
+      game.hardDrop();
+      expect(game.pendingGarbageLines, 0);
+    });
+
+    test('garbage pushing the stack out of the matrix tops the player out',
+        () {
+      final game = TetrisGame(seed: 1, scriptedPieces: [
+        Tetromino.o,
+        Tetromino.o,
+      ]);
+      // Occupy the very top row of the hidden buffer so any upward shift
+      // pushes blocks out.
+      game.setCell(4, 0, Tetromino.z);
+      game.enqueueGarbage(1);
+
+      game.hardDrop();
+
+      expect(game.gameOver, isTrue);
+      expect(game.drainEvents().whereType<ToppedOutEvent>(), isNotEmpty);
+    });
+
+    test('attack table matches guideline-lite values', () {
+      LineClearResult clear(
+        int lines, {
+        bool tSpin = false,
+        bool b2b = false,
+        bool pc = false,
+      }) {
+        return LineClearResult(
+          lines: lines,
+          tSpin: tSpin,
+          perfectClear: pc,
+          backToBack: b2b,
+          points: 0,
+        );
+      }
+
+      expect(TetrisGame.attackForClear(clear(1), 0), 0);
+      expect(TetrisGame.attackForClear(clear(2), 0), 1);
+      expect(TetrisGame.attackForClear(clear(3), 0), 2);
+      expect(TetrisGame.attackForClear(clear(4), 0), 4);
+      expect(TetrisGame.attackForClear(clear(1, tSpin: true), 0), 2);
+      expect(TetrisGame.attackForClear(clear(2, tSpin: true), 0), 4);
+      expect(TetrisGame.attackForClear(clear(3, tSpin: true), 0), 6);
+      expect(TetrisGame.attackForClear(clear(4, b2b: true), 0), 5);
+      expect(TetrisGame.attackForClear(clear(4, pc: true), 0), 14);
+      // Combo bonus ramps with sustained clears.
+      expect(TetrisGame.attackForClear(clear(2), 2), 2);
+      expect(TetrisGame.attackForClear(clear(2), 11), 6);
+      expect(TetrisGame.attackForClear(clear(0), 5), 0);
+    });
+
+    test('locks without clears emit PieceLockedEvent', () {
+      final game = TetrisGame(seed: 1);
+      game.hardDrop();
+
+      final events = game.drainEvents();
+      expect(events.whereType<PieceLockedEvent>(), hasLength(1));
+      expect(game.drainEvents(), isEmpty);
+    });
+
+    test('same seed yields identical pieces even when one side gets garbage',
+        () {
+      final a = TetrisGame(seed: 42);
+      final b = TetrisGame(seed: 42);
+
+      final piecesA = <Tetromino>[];
+      final piecesB = <Tetromino>[];
+      for (var i = 0; i < 15 && !a.gameOver && !b.gameOver; i += 1) {
+        piecesA.add(a.active!.type);
+        piecesB.add(b.active!.type);
+        if (i.isEven) {
+          b.enqueueGarbage(1);
+        }
+        a.hardDrop();
+        b.hardDrop();
+      }
+
+      // Enough pieces to cross a bag refill boundary.
+      expect(piecesA.length, greaterThanOrEqualTo(8));
+      expect(piecesB, piecesA);
+    });
+
+    test('round-trips pending garbage through toJson/restore', () {
+      final game = TetrisGame(seed: 3);
+      game.enqueueGarbage(2);
+      game.enqueueGarbage(1);
+
+      final restored = TetrisGame(seed: 9)..restore(game.toJson());
+
+      expect(restored.pendingGarbageLines, 3);
+    });
+
+    test('restores saves that predate pending garbage', () {
+      final game = TetrisGame(seed: 3);
+      final json = game.toJson()..remove('pendingGarbage');
+
+      final restored = TetrisGame(seed: 9)..restore(json);
+
+      expect(restored.pendingGarbageLines, 0);
     });
   });
 }
