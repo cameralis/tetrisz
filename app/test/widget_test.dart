@@ -34,6 +34,29 @@ void _usePhoneViewport(WidgetTester tester) {
   addTearDown(tester.view.resetDevicePixelRatio);
 }
 
+/// Pumps the app and navigates from the home menu onto the game page.
+/// Cannot use pumpAndSettle: the game page's ticker never settles.
+Future<void> _pumpGameFromHome(
+  WidgetTester tester, {
+  bool enableAudio = false,
+  TetrisMusicPlayer? musicPlayer,
+  TetrisSoundEffects? soundEffects,
+  TetrisHaptics? haptics,
+}) async {
+  await tester.pumpWidget(
+    TetrisApp(
+      enableAudio: enableAudio,
+      musicPlayer: musicPlayer,
+      soundEffects: soundEffects,
+      haptics: haptics,
+    ),
+  );
+  await tester.tap(find.byKey(const ValueKey('home-play')));
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 400));
+  await tester.pump(const Duration(milliseconds: 400));
+}
+
 void _useLandscapeViewport(WidgetTester tester) {
   tester.view.physicalSize = _landscapeViewport;
   tester.view.devicePixelRatio = 1;
@@ -385,7 +408,7 @@ void main() {
   testWidgets('renders the playable Tetris surface', (tester) async {
     _usePhoneViewport(tester);
 
-    await tester.pumpWidget(const TetrisApp(enableAudio: false));
+    await _pumpGameFromHome(tester);
     await tester.pump();
 
     expect(find.text('TETRIS'), findsNothing);
@@ -400,7 +423,7 @@ void main() {
   testWidgets('renders without overflow on a phone viewport', (tester) async {
     _usePhoneViewport(tester);
 
-    await tester.pumpWidget(const TetrisApp(enableAudio: false));
+    await _pumpGameFromHome(tester);
     await tester.pump();
 
     final board = find.byKey(const ValueKey('tetris-board'));
@@ -437,7 +460,7 @@ void main() {
   ) async {
     _useLandscapeViewport(tester);
 
-    await tester.pumpWidget(const TetrisApp(enableAudio: false));
+    await _pumpGameFromHome(tester);
     await tester.pump();
 
     final board = find.byKey(const ValueKey('tetris-board'));
@@ -711,7 +734,7 @@ void main() {
   ) async {
     _usePhoneViewport(tester);
 
-    await tester.pumpWidget(const TetrisApp(enableAudio: false));
+    await _pumpGameFromHome(tester);
     await _flushPreferenceTasks(tester);
 
     await tester.tap(find.byTooltip('Pause'));
@@ -726,7 +749,7 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
 
-    await tester.pumpWidget(const TetrisApp(enableAudio: false));
+    await _pumpGameFromHome(tester);
     await _flushPreferenceTasks(tester);
 
     await tester.tap(find.byTooltip('Pause'));
@@ -770,7 +793,7 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
 
-    await tester.pumpWidget(const TetrisApp(enableAudio: false));
+    await _pumpGameFromHome(tester);
     await _flushPreferenceTasks(tester);
     await tester.tap(find.byTooltip('Pause'));
     await tester.pump();
@@ -795,7 +818,7 @@ void main() {
       tetrisSavedGamePreferenceKey: jsonEncode(source.toJson()),
     });
 
-    await tester.pumpWidget(const TetrisApp(enableAudio: false));
+    await _pumpGameFromHome(tester);
     await _flushPreferenceTasks(tester);
 
     expect(find.text('PAUSED'), findsOneWidget);
@@ -849,7 +872,7 @@ void main() {
       tetrisSavedGamePreferenceKey: jsonEncode(finished.toJson()),
     });
 
-    await tester.pumpWidget(const TetrisApp(enableAudio: false));
+    await _pumpGameFromHome(tester);
     await _flushPreferenceTasks(tester);
 
     // A finished snapshot must not resume; the player gets a fresh board.
@@ -869,9 +892,7 @@ void main() {
     final musicPlayer = _RecordingMusicPlayer();
     addTearDown(musicPlayer.dispose);
 
-    await tester.pumpWidget(
-      TetrisApp(enableAudio: true, musicPlayer: musicPlayer),
-    );
+    await _pumpGameFromHome(tester, enableAudio: true, musicPlayer: musicPlayer);
     await _flushPreferenceTasks(tester);
 
     expect(musicPlayer.playedAssets, [tetrisMusicPlaylist[0]]);
@@ -909,9 +930,7 @@ void main() {
     final musicPlayer = _RecordingMusicPlayer();
     addTearDown(musicPlayer.dispose);
 
-    await tester.pumpWidget(
-      TetrisApp(enableAudio: true, musicPlayer: musicPlayer),
-    );
+    await _pumpGameFromHome(tester, enableAudio: true, musicPlayer: musicPlayer);
     await _flushPreferenceTasks(tester);
 
     musicPlayer.completeTrack();
@@ -1010,7 +1029,7 @@ void main() {
   ) async {
     _usePhoneViewport(tester);
 
-    await tester.pumpWidget(const TetrisApp(enableAudio: false));
+    await _pumpGameFromHome(tester);
     await tester.pump();
 
     for (var i = 0; i < 12 && _boardLineClearSnapShader(tester) == null; i++) {

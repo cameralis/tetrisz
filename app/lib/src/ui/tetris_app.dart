@@ -11,6 +11,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../game/tetris_game.dart';
 import '../game/tetromino.dart';
+import '../net/versus_session.dart';
+import 'board_painting.dart';
+import 'home_page.dart';
+import 'versus_widgets.dart';
 
 const _boardBack = Color(0xFF07080A);
 const _background = _boardBack;
@@ -313,13 +317,22 @@ class TetrisApp extends StatelessWidget {
           displayColor: _text,
         ),
       ),
-      home: TetrisGamePage(
-        enableAudio: enableAudio,
-        game: game,
-        musicPlayer: musicPlayer,
-        soundEffects: soundEffects,
-        haptics: haptics,
-      ),
+      // Tests inject a game and land straight on the board; production boots
+      // to the home menu.
+      home: game != null
+          ? TetrisGamePage(
+              enableAudio: enableAudio,
+              game: game,
+              musicPlayer: musicPlayer,
+              soundEffects: soundEffects,
+              haptics: haptics,
+            )
+          : HomePage(
+              enableAudio: enableAudio,
+              musicPlayer: musicPlayer,
+              soundEffects: soundEffects,
+              haptics: haptics,
+            ),
     );
   }
 }
@@ -332,6 +345,7 @@ class TetrisGamePage extends StatefulWidget {
     this.musicPlayer,
     this.soundEffects,
     this.haptics,
+    this.versusSession,
   });
 
   final bool enableAudio;
@@ -340,13 +354,19 @@ class TetrisGamePage extends StatefulWidget {
   final TetrisSoundEffects? soundEffects;
   final TetrisHaptics? haptics;
 
+  /// When set, this page runs a 1v1 match: the session owns the seeded game,
+  /// persistence and pause are disabled, and versus overlays render on top of
+  /// the board.
+  final VersusSession? versusSession;
+
   @override
   State<TetrisGamePage> createState() => _TetrisGamePageState();
 }
 
 class _TetrisGamePageState extends State<TetrisGamePage>
     with TickerProviderStateMixin, WidgetsBindingObserver {
-  late final TetrisGame _game;
+  // Not `final`: a versus rematch swaps in a fresh seeded game.
+  late TetrisGame _game;
   late final Ticker _ticker;
   late final AnimationController _snapBackController;
   late final AnimationController _lineClearController;
@@ -395,7 +415,13 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _game = widget.game ?? TetrisGame();
+    _game = widget.game ?? widget.versusSession?.game ?? TetrisGame();
+    final session = widget.versusSession;
+    if (session != null) {
+      session.gameNotifier.addListener(_onVersusGameSwapped);
+      session.phase.addListener(_onVersusStateChanged);
+      session.opponent.addListener(_onVersusStateChanged);
+    }
     _preferencesFuture = _loadPreferences();
     final soundEffects = widget.soundEffects;
     if (soundEffects != null) {
@@ -454,6 +480,13 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    final session = widget.versusSession;
+    if (session != null) {
+      session.gameNotifier.removeListener(_onVersusGameSwapped);
+      session.phase.removeListener(_onVersusStateChanged);
+      session.opponent.removeListener(_onVersusStateChanged);
+      unawaited(session.dispose());
+    }
     _softDropTimer?.cancel();
     _lineClearSnapImage?.dispose();
     _snapBackController.dispose();
@@ -578,6 +611,14 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       return;
     }
 
+    if (widget.versusSession != null) {
+      // A versus board must not pause (the opponent keeps playing) and never
+      // persists. The room socket reconnects on resume; staying away past
+      // the grace period forfeits the match on the opponent's side.
+      unawaited(_musicPlayer?.pause() ?? Future.value());
+      return;
+    }
+
     // Leaving the foreground: freeze the round so nothing falls while the
     // player is away and persist a resumable snapshot to disk.
     _autoPauseForBackground();
@@ -599,9 +640,31 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     }
   }
 
+  void _onVersusGameSwapped() {
+    final session = widget.versusSession;
+    if (session == null || !mounted) {
+      return;
+    }
+    setState(() {
+      _game = session.game;
+      _lineClearAnimating = false;
+      _lineClearSnapshot = null;
+      _boardImpactOffsetCells = Offset.zero;
+    });
+  }
+
+  void _onVersusStateChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
   void _onFrame(Duration elapsed) {
     final delta = elapsed - _lastFrameElapsed;
     _lastFrameElapsed = elapsed;
+    // Versus event drain runs every frame, even while the board is paused or
+    // animating, so attacks and game-over reach the opponent immediately.
+    widget.versusSession?.onLocalTick();
     if (delta <= Duration.zero ||
         delta > _maxTickDelta ||
         _game.paused ||
@@ -643,8 +706,11 @@ class _TetrisGamePageState extends State<TetrisGamePage>
           _sfxVolume = sfxVolume.clamp(0.0, _maxSfxVolume).toDouble();
         }
         // Only adopt a disk snapshot when the host did not inject a specific
-        // game (production always uses the internal game; tests can override).
-        if (savedGame != null && widget.game == null) {
+        // game (production always uses the internal game; tests can override)
+        // and this is not a versus match, whose game is seeded by the server.
+        if (savedGame != null &&
+            widget.game == null &&
+            widget.versusSession == null) {
           _restoreSavedGame(savedGame);
         }
         _highScore = math.max(highScore ?? 0, _game.score);
@@ -907,6 +973,9 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   }
 
   void _togglePause() {
+    if (widget.versusSession != null) {
+      return; // No pausing in versus: the opponent keeps playing.
+    }
     setState(_game.togglePause);
     if (_game.paused) {
       unawaited(_musicPlayer?.pause() ?? Future.value());
@@ -956,6 +1025,9 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   }
 
   void _recordHighScoreIfNeeded() {
+    if (widget.versusSession != null) {
+      return; // Garbage-fed versus scores do not compete with solo runs.
+    }
     if (_game.score <= _highScore) {
       return;
     }
@@ -992,6 +1064,11 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   }
 
   Future<void> _persistGameState() async {
+    if (widget.versusSession != null) {
+      // Versus matches are never resumable; persisting one would also
+      // clobber the single-player save.
+      return;
+    }
     try {
       final preferences = await SharedPreferences.getInstance();
       if (_game.gameOver) {
@@ -1442,6 +1519,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
               lines: _game.lines,
               paused: _game.paused,
               onPause: _togglePause,
+              showPause: widget.versusSession == null,
             ),
           ),
           Expanded(
@@ -1504,6 +1582,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   }
 
   Widget _buildBoardCanvas(double width, double height) {
+    final session = widget.versusSession;
     return SizedBox(
       key: const ValueKey('tetris-board'),
       width: width,
@@ -1527,7 +1606,8 @@ class _TetrisGamePageState extends State<TetrisGamePage>
               size: Size.infinite,
             ),
           ),
-          if (_game.gameOver || _game.paused)
+          if (session != null) ..._buildVersusLayer(session, width),
+          if (session == null && (_game.gameOver || _game.paused))
             _GameOverlay(
               gameOver: _game.gameOver,
               score: _game.score,
@@ -1543,6 +1623,40 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       ),
     );
   }
+
+  List<Widget> _buildVersusLayer(VersusSession session, double boardWidth) {
+    return [
+      Positioned(
+        left: 2,
+        top: 0,
+        bottom: 0,
+        child: GarbageMeter(pendingLines: _game.pendingGarbageLines),
+      ),
+      Positioned(
+        right: 6,
+        top: 6,
+        width: boardWidth * 0.30,
+        child: OpponentBoardView(session: session),
+      ),
+      Positioned(
+        left: 12,
+        bottom: 8,
+        child: TransportChip(session: session),
+      ),
+      if (session.phase.value == VersusPhase.countdown)
+        CountdownOverlay(
+          key: ValueKey('countdown-${session.matchId}'),
+          duration: session.countdownDuration,
+        ),
+      if (session.phase.value == VersusPhase.won ||
+          session.phase.value == VersusPhase.lost ||
+          session.phase.value == VersusPhase.opponentLeft)
+        VersusResultOverlay(
+          session: session,
+          onLeave: () => Navigator.of(context).maybePop(),
+        ),
+    ];
+  }
 }
 
 class _CompactTopBar extends StatelessWidget {
@@ -1554,6 +1668,7 @@ class _CompactTopBar extends StatelessWidget {
     required this.lines,
     required this.paused,
     required this.onPause,
+    this.showPause = true,
   });
 
   final Tetromino? holdPiece;
@@ -1563,6 +1678,7 @@ class _CompactTopBar extends StatelessWidget {
   final int lines;
   final bool paused;
   final VoidCallback onPause;
+  final bool showPause;
 
   @override
   Widget build(BuildContext context) {
@@ -1592,8 +1708,10 @@ class _CompactTopBar extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             _TopPieceSlot(title: 'NEXT', piece: nextPiece),
-            const SizedBox(width: 8),
-            _TopControls(paused: paused, framed: false, onPause: onPause),
+            if (showPause) ...[
+              const SizedBox(width: 8),
+              _TopControls(paused: paused, framed: false, onPause: onPause),
+            ],
           ],
         ),
       ),
@@ -2326,14 +2444,8 @@ class _PiecePreviewPainter extends CustomPainter {
   }
 }
 
-Rect _cellRect(Offset origin, double cellSize, num x, num y) {
-  return Rect.fromLTWH(
-    origin.dx + x.toDouble() * cellSize,
-    origin.dy + y.toDouble() * cellSize,
-    cellSize,
-    cellSize,
-  );
-}
+Rect _cellRect(Offset origin, double cellSize, num x, num y) =>
+    cellRect(origin, cellSize, x, y);
 
 void _drawMino(
   Canvas canvas,
@@ -2342,25 +2454,7 @@ void _drawMino(
   num x,
   num y,
   Tetromino type,
-) {
-  final rect = _cellRect(origin, cellSize, x, y).deflate(cellSize * 0.06);
-  final radius = Radius.circular(cellSize * 0.14);
-  final color = _colorFor(type);
-  canvas.drawRRect(
-    RRect.fromRectAndRadius(rect, radius),
-    Paint()..color = color,
-  );
-  final highlight = Rect.fromLTWH(
-    rect.left + cellSize * 0.08,
-    rect.top + cellSize * 0.08,
-    rect.width - cellSize * 0.16,
-    math.max(1, rect.height * 0.18),
-  );
-  canvas.drawRRect(
-    RRect.fromRectAndRadius(highlight, Radius.circular(cellSize * 0.08)),
-    Paint()..color = Colors.white.withValues(alpha: 0.22),
-  );
-}
+) => drawMino(canvas, origin, cellSize, x, y, type);
 
 void _drawGhostPiece(
   Canvas canvas,
@@ -2497,15 +2591,3 @@ ui.Color tetrisGhostHdrOutlineColorFor(Tetromino type) {
   };
 }
 
-Color _colorFor(Tetromino type) {
-  return switch (type) {
-    Tetromino.i => const Color(0xFF43D9FF),
-    Tetromino.j => const Color(0xFF3568FF),
-    Tetromino.l => const Color(0xFFFF9E2C),
-    Tetromino.o => const Color(0xFFFFE156),
-    Tetromino.s => const Color(0xFF58D957),
-    Tetromino.z => const Color(0xFFFF4D5E),
-    Tetromino.t => const Color(0xFFD85BFF),
-    Tetromino.garbage => const Color(0xFF7A8291),
-  };
-}
