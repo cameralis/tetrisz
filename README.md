@@ -30,6 +30,19 @@ pnpm test
 pnpm deploy     # wrangler deploy (needs Cloudflare auth)
 ```
 
+## Building releases
+
+`scripts/build.sh` wraps the release flows:
+
+```sh
+scripts/build.sh macos              # build the macOS desktop app (App Sandbox off) and install to /Applications
+scripts/build.sh ipa                # build + package the iOS App Store IPA (no upload)
+scripts/build.sh testflight         # build + package + upload the iOS app to TestFlight
+scripts/build.sh testflight --bump  # also bump the build number (X.Y.Z+N -> +N+1) and commit first
+```
+
+TestFlight uploads need an app-specific password for `apple@tear.one` — pass it as `ASC_APP_PW=…` or put it in `scripts/.asc_app_pw` (gitignored). The macOS build keeps App Sandbox disabled so WebRTC multiplayer works; the script aborts if the sandbox is ever re-enabled.
+
 ## Local 1v1 end-to-end test
 
 1. `cd backend && pnpm dev`
