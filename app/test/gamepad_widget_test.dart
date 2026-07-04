@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gamepads/gamepads.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -211,6 +212,83 @@ void main() {
     expect(game.lockCount, 1);
     gamepad.setButton(GamepadButton.a, false);
     await _deliver(tester);
+  });
+
+  testWidgets('guideline keyboard defaults drive the board', (tester) async {
+    _usePhoneViewport(tester);
+    SharedPreferences.setMockInitialValues({});
+    final gamepad = _FakeGamepad();
+    final game = await _pumpGame(tester, gamepad);
+
+    final spawnX = game.active!.x;
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pump();
+    expect(game.active!.x, spawnX - 1);
+
+    // X rotates clockwise, Z counterclockwise.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyX);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyX);
+    await tester.pump();
+    expect(game.active!.rotation, 1);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyZ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyZ);
+    await tester.pump();
+    expect(game.active!.rotation, 0);
+
+    // C holds.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyC);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyC);
+    await tester.pump();
+    expect(game.holdPiece, Tetromino.t);
+
+    // Down arrow engages sustained soft drop while held.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    expect(game.softDropping, isTrue);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    expect(game.softDropping, isFalse);
+
+    // Space hard drops and locks.
+    final locksBefore = game.lockCount;
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.space);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.space);
+    await tester.pump();
+    expect(game.lockCount, locksBefore + 1);
+
+    // Escape pauses; a second press resumes.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.escape);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(game.paused, isTrue);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.escape);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(game.paused, isFalse);
+  });
+
+  testWidgets('custom keyboard bindings from preferences apply', (tester) async {
+    _usePhoneViewport(tester);
+    SharedPreferences.setMockInitialValues({
+      tetrisKeyboardBindingsPreferenceKey:
+          '{"${LogicalKeyboardKey.enter.keyId}":"hardDrop"}',
+    });
+    final gamepad = _FakeGamepad();
+    final game = await _pumpGame(tester, gamepad);
+
+    // Arrow up is not in the custom map, so it does nothing.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowUp);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pump();
+    expect(game.lockCount, 0);
+    expect(game.active!.rotation, 0);
+
+    // Enter is the newly-bound hard drop.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(game.lockCount, 1);
   });
 
   testWidgets('rebound touch gestures apply', (tester) async {

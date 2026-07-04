@@ -406,6 +406,9 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   StreamSubscription<GamepadControlEvent>? _gamepadSubscription;
   GamepadBindings _gamepadBindings = GamepadBindings.guideline();
   TouchBindings _touchBindings = TouchBindings.defaults();
+  KeyboardBindings _keyboardBindings = KeyboardBindings.guideline();
+  final FocusNode _keyboardFocusNode = FocusNode(debugLabel: 'TetrisGamePage');
+  final Set<int> _pressedKeyIds = <int>{};
   final DasRepeater _dasRepeater = DasRepeater();
 
   Duration _lastFrameElapsed = Duration.zero;
@@ -524,6 +527,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _lineClearController.dispose();
     _boardImpactController.dispose();
     _ticker.dispose();
+    _keyboardFocusNode.dispose();
     unawaited(_gamepadSubscription?.cancel() ?? Future.value());
     unawaited(_musicCompleteSubscription?.cancel() ?? Future.value());
     if (_disposeSoundEffects) {
@@ -759,6 +763,9 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       final touchBindings = TouchBindings.decode(
         preferences.getString(tetrisTouchBindingsPreferenceKey),
       );
+      final keyboardBindings = KeyboardBindings.decode(
+        preferences.getString(tetrisKeyboardBindingsPreferenceKey),
+      );
       if (!mounted) {
         return;
       }
@@ -766,6 +773,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       setState(() {
         _gamepadBindings = gamepadBindings;
         _touchBindings = touchBindings;
+        _keyboardBindings = keyboardBindings;
         if (musicVolume != null) {
           _musicVolume = musicVolume.clamp(0.0, 1.0).toDouble();
         }
@@ -1349,6 +1357,33 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     }
   }
 
+  /// Routes physical key edges through the same action dispatcher the
+  /// gamepad uses. The OS's own key-repeat is ignored — [DasRepeater]
+  /// generates piece-shift repeats on our timing, so a held key never
+  /// double-fires.
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    final keyId = event.logicalKey.keyId;
+    final action = _keyboardBindings.actionFor(keyId);
+    if (action == null) {
+      return KeyEventResult.ignored;
+    }
+    if (event is KeyDownEvent) {
+      _pressedKeyIds.add(keyId);
+      _onGamepadActionPressed(action);
+      return KeyEventResult.handled;
+    }
+    if (event is KeyUpEvent) {
+      // A binding change while a key is held would otherwise leak a stuck
+      // press; only release actions we recorded as pressed.
+      if (_pressedKeyIds.remove(keyId)) {
+        _onGamepadActionReleased(action);
+      }
+      return KeyEventResult.handled;
+    }
+    // KeyRepeatEvent: swallowed so we do not fight our own DAS.
+    return KeyEventResult.handled;
+  }
+
   void _onGamepadActionPressed(GameAction action) {
     switch (action) {
       case GameAction.moveLeft:
@@ -1656,19 +1691,24 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     // menu in solo, the result overlay in versus.
     return PopScope(
       canPop: false,
-      child: Scaffold(
-        body: SafeArea(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final compact =
-                  constraints.maxWidth < 760 || constraints.maxHeight < 500;
+      child: Focus(
+        focusNode: _keyboardFocusNode,
+        autofocus: true,
+        onKeyEvent: _onKey,
+        child: Scaffold(
+          body: SafeArea(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final compact =
+                    constraints.maxWidth < 760 || constraints.maxHeight < 500;
 
-              if (compact) {
-                return _buildCompactLayout(constraints);
-              }
+                if (compact) {
+                  return _buildCompactLayout(constraints);
+                }
 
-              return _buildWideLayout(constraints);
-            },
+                return _buildWideLayout(constraints);
+              },
+            ),
           ),
         ),
       ),

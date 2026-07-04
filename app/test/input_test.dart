@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gamepads/gamepads.dart';
 import 'package:tetris/src/input/control_bindings.dart';
@@ -181,6 +182,143 @@ void main() {
       final decoded = TouchBindings.decode('{"tapRight":"hold"}');
       expect(decoded.actionFor(TouchGesture.tapRight), GameAction.hold);
       expect(decoded.actionFor(TouchGesture.swipeDown), GameAction.hardDrop);
+    });
+  });
+
+  group('KeyboardBindings', () {
+    test('guideline defaults follow tetris.wiki keyboard mappings', () {
+      final bindings = KeyboardBindings.guideline();
+      expect(
+        bindings.actionFor(LogicalKeyboardKey.arrowLeft.keyId),
+        GameAction.moveLeft,
+      );
+      expect(
+        bindings.actionFor(LogicalKeyboardKey.arrowRight.keyId),
+        GameAction.moveRight,
+      );
+      expect(
+        bindings.actionFor(LogicalKeyboardKey.arrowDown.keyId),
+        GameAction.softDrop,
+      );
+      expect(
+        bindings.actionFor(LogicalKeyboardKey.arrowUp.keyId),
+        GameAction.rotateClockwise,
+      );
+      expect(
+        bindings.actionFor(LogicalKeyboardKey.space.keyId),
+        GameAction.hardDrop,
+      );
+      // Z rotates left, X rotates right — the canonical Guideline mapping.
+      expect(
+        bindings.actionFor(LogicalKeyboardKey.keyZ.keyId),
+        GameAction.rotateCounterClockwise,
+      );
+      expect(
+        bindings.actionFor(LogicalKeyboardKey.keyX.keyId),
+        GameAction.rotateClockwise,
+      );
+      // Hold is mirrored on Shift so one-handed play still works.
+      expect(
+        bindings.actionFor(LogicalKeyboardKey.keyC.keyId),
+        GameAction.hold,
+      );
+      expect(
+        bindings.actionFor(LogicalKeyboardKey.shiftLeft.keyId),
+        GameAction.hold,
+      );
+      // Escape doubles as the desktop-conventional pause; P is the arcade one.
+      expect(
+        bindings.actionFor(LogicalKeyboardKey.escape.keyId),
+        GameAction.pause,
+      );
+      expect(
+        bindings.actionFor(LogicalKeyboardKey.keyP.keyId),
+        GameAction.pause,
+      );
+    });
+
+    test('bind and unbind produce new instances without mutating the source',
+        () {
+      final defaults = KeyboardBindings.guideline();
+      final rebound = defaults.bind(
+        LogicalKeyboardKey.enter.keyId,
+        GameAction.hardDrop,
+      );
+      expect(
+        defaults.actionFor(LogicalKeyboardKey.enter.keyId),
+        isNull,
+        reason: 'bind must not mutate the receiver',
+      );
+      expect(
+        rebound.actionFor(LogicalKeyboardKey.enter.keyId),
+        GameAction.hardDrop,
+      );
+
+      final unbound = rebound.unbind(LogicalKeyboardKey.arrowUp.keyId);
+      expect(
+        unbound.actionFor(LogicalKeyboardKey.arrowUp.keyId),
+        isNull,
+      );
+      // Untouched entries survive the unbind.
+      expect(
+        unbound.actionFor(LogicalKeyboardKey.enter.keyId),
+        GameAction.hardDrop,
+      );
+    });
+
+    test('encode / decode round trip preserves custom bindings', () {
+      final custom = KeyboardBindings.guideline()
+          .bind(LogicalKeyboardKey.tab.keyId, GameAction.hold)
+          .unbind(LogicalKeyboardKey.escape.keyId);
+      final decoded = KeyboardBindings.decode(custom.encode());
+      expect(
+        decoded.actionFor(LogicalKeyboardKey.tab.keyId),
+        GameAction.hold,
+      );
+      expect(
+        decoded.actionFor(LogicalKeyboardKey.escape.keyId),
+        isNull,
+      );
+      // Untouched defaults survive the round trip.
+      expect(
+        decoded.actionFor(LogicalKeyboardKey.space.keyId),
+        GameAction.hardDrop,
+      );
+    });
+
+    test('decode falls back to defaults for null and malformed JSON', () {
+      expect(
+        KeyboardBindings.decode(null)
+            .actionFor(LogicalKeyboardKey.arrowLeft.keyId),
+        GameAction.moveLeft,
+      );
+      expect(
+        KeyboardBindings.decode('not json')
+            .actionFor(LogicalKeyboardKey.arrowLeft.keyId),
+        GameAction.moveLeft,
+      );
+      // A JSON array is well-formed but not a binding map.
+      expect(
+        KeyboardBindings.decode('[]')
+            .actionFor(LogicalKeyboardKey.arrowLeft.keyId),
+        GameAction.moveLeft,
+      );
+    });
+
+    test('decode skips unparseable key IDs and unknown actions', () {
+      final decoded = KeyboardBindings.decode(
+        '{"not-a-number":"moveLeft","${LogicalKeyboardKey.enter.keyId}":"nope"}',
+      );
+      // Neither entry survived, so no new binding appears.
+      expect(decoded.actionFor(LogicalKeyboardKey.enter.keyId), isNull);
+    });
+
+    test('keyboardKeyLabel is human readable for common keys', () {
+      expect(keyboardKeyLabel(LogicalKeyboardKey.keyA.keyId), 'A');
+      // Space's keyLabel is whitespace; the pretty label falls back to
+      // debugName so the rebind UI never shows a blank chip.
+      expect(keyboardKeyLabel(LogicalKeyboardKey.space.keyId), 'Space');
+      expect(keyboardKeyLabel(LogicalKeyboardKey.arrowLeft.keyId), 'Left');
     });
   });
 
