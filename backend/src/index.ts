@@ -57,7 +57,10 @@ export default {
     }
 
     if (url.pathname === "/api/leaderboard") {
-      const stub = env.LEADERBOARD.get(env.LEADERBOARD.idFromName("global"));
+      // The instance name doubles as the scoring era: bumping it starts a
+      // fresh board when scoring rules change (era 2: guideline T-spin mini
+      // rebalance, 2026-07). Old instances are simply orphaned.
+      const stub = env.LEADERBOARD.get(env.LEADERBOARD.idFromName("global-era2"));
       if (request.method === "GET") {
         const response = await stub.fetch("https://leaderboard/list");
         return withCors(response);
