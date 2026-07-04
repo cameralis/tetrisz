@@ -1905,10 +1905,17 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       Positioned(
         right: 6,
         top: 6,
-        width: boardWidth * 0.30,
-        child: OpponentBoardView(session: session),
+        child: TransportChip(session: session),
       ),
-      Positioned(left: 12, bottom: 8, child: TransportChip(session: session)),
+      Positioned(
+        right: 6,
+        top: 38,
+        width: boardWidth * 0.30,
+        child: Opacity(
+          opacity: 0.7,
+          child: OpponentBoardView(session: session),
+        ),
+      ),
       if (session.phase.value == VersusPhase.countdown)
         CountdownOverlay(
           key: ValueKey('countdown-${session.matchId}'),
