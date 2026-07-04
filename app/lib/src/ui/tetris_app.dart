@@ -14,6 +14,7 @@ import '../game/tetromino.dart';
 import '../input/control_bindings.dart';
 import '../input/das_repeater.dart';
 import '../input/gamepad_service.dart';
+import '../input/gamepad_ui_navigator.dart';
 import '../net/leaderboard_client.dart';
 import '../net/versus_session.dart';
 import 'board_painting.dart';
@@ -347,7 +348,7 @@ final class _SoundSnapshot {
   final int level;
 }
 
-class TetrisApp extends StatelessWidget {
+class TetrisApp extends StatefulWidget {
   const TetrisApp({
     super.key,
     this.enableAudio = true,
@@ -369,10 +370,25 @@ class TetrisApp extends StatelessWidget {
   final GamepadService? gamepad;
 
   @override
+  State<TetrisApp> createState() => _TetrisAppState();
+}
+
+class _TetrisAppState extends State<TetrisApp> {
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+
+  @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Tetris',
       debugShowCheckedModeBanner: false,
+      navigatorKey: _navigatorKey,
+      // Above the Navigator so every route, dialog and overlay is
+      // controller-navigable (d-pad moves focus, South activates, East pops).
+      builder: (context, child) => GamepadUiNavigator(
+        gamepad: widget.gamepad,
+        navigatorKey: _navigatorKey,
+        child: child ?? const SizedBox.shrink(),
+      ),
       theme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.dark,
@@ -388,21 +404,21 @@ class TetrisApp extends StatelessWidget {
       ),
       // Tests inject a game and land straight on the board; production boots
       // to the home menu.
-      home: game != null
+      home: widget.game != null
           ? TetrisGamePage(
-              enableAudio: enableAudio,
-              game: game,
-              musicPlayer: musicPlayer,
-              soundEffects: soundEffects,
-              haptics: haptics,
-              gamepad: gamepad,
+              enableAudio: widget.enableAudio,
+              game: widget.game,
+              musicPlayer: widget.musicPlayer,
+              soundEffects: widget.soundEffects,
+              haptics: widget.haptics,
+              gamepad: widget.gamepad,
             )
           : HomePage(
-              enableAudio: enableAudio,
-              musicPlayer: musicPlayer,
-              soundEffects: soundEffects,
-              haptics: haptics,
-              gamepad: gamepad,
+              enableAudio: widget.enableAudio,
+              musicPlayer: widget.musicPlayer,
+              soundEffects: widget.soundEffects,
+              haptics: widget.haptics,
+              gamepad: widget.gamepad,
             ),
     );
   }
@@ -487,9 +503,40 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   ui.Image? _lineClearSnapImage;
   bool _lineClearSnapWarmUpComplete = false;
   bool _leaderboardSubmitted = false;
+  bool _gamepadClaimedForPlay = false;
 
   bool get _boardAcceptsInput =>
       !_game.paused && !_game.gameOver && !_lineClearAnimating;
+
+  /// While the board is live the controller belongs to gameplay; once a
+  /// menu-like surface is up (pause / game over overlay, versus result) the
+  /// claim is released so the global [GamepadUiNavigator] can drive it.
+  /// Called from build so every state transition re-evaluates it.
+  void _syncGamepadUiNavigationClaim() {
+    final gamepad = widget.gamepad;
+    if (gamepad == null) {
+      return;
+    }
+    final session = widget.versusSession;
+    final menuSurfaceShown = session == null
+        ? _game.paused || _game.gameOver
+        : switch (session.phase.value) {
+            VersusPhase.won ||
+            VersusPhase.lost ||
+            VersusPhase.opponentLeft => true,
+            _ => false,
+          };
+    final claim = !menuSurfaceShown;
+    if (claim == _gamepadClaimedForPlay) {
+      return;
+    }
+    _gamepadClaimedForPlay = claim;
+    if (claim) {
+      gamepad.blockUiNavigation();
+    } else {
+      gamepad.unblockUiNavigation();
+    }
+  }
 
   @override
   void initState() {
@@ -563,6 +610,10 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   @override
   void dispose() {
     _flushHighScore();
+    if (_gamepadClaimedForPlay) {
+      _gamepadClaimedForPlay = false;
+      widget.gamepad?.unblockUiNavigation();
+    }
     WidgetsBinding.instance.removeObserver(this);
     final session = widget.versusSession;
     if (session != null) {
@@ -1726,6 +1777,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
 
   @override
   Widget build(BuildContext context) {
+    _syncGamepadUiNavigationClaim();
     // Block the iOS edge-swipe / Android back gesture: an accidental pop
     // mid-round would silently abandon the game (and forfeit a versus
     // match). Leaving is always an explicit button: the pause/game-over
@@ -1797,6 +1849,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
                     lines: _game.lines,
                     paused: _game.paused,
                     showPause: widget.versusSession == null,
+                    pauseFocusable: !_game.paused && !_game.gameOver,
                     onPause: _togglePause,
                   ),
                 ),
@@ -1858,6 +1911,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
               paused: _game.paused,
               onPause: _togglePause,
               showPause: widget.versusSession == null,
+              pauseFocusable: !_game.paused && !_game.gameOver,
             ),
           ),
           Expanded(
@@ -2015,6 +2069,7 @@ class _WideLeftColumn extends StatelessWidget {
     required this.paused,
     required this.showPause,
     required this.onPause,
+    this.pauseFocusable = true,
   });
 
   final Tetromino? holdPiece;
@@ -2024,6 +2079,7 @@ class _WideLeftColumn extends StatelessWidget {
   final bool paused;
   final bool showPause;
   final VoidCallback onPause;
+  final bool pauseFocusable;
 
   @override
   Widget build(BuildContext context) {
@@ -2068,7 +2124,11 @@ class _WideLeftColumn extends StatelessWidget {
         if (showPause)
           Align(
             alignment: Alignment.centerLeft,
-            child: _TopControls(paused: paused, onPause: onPause),
+            child: _TopControls(
+              paused: paused,
+              onPause: onPause,
+              focusable: pauseFocusable,
+            ),
           ),
       ],
     );
@@ -2137,6 +2197,7 @@ class _CompactTopBar extends StatelessWidget {
     required this.paused,
     required this.onPause,
     this.showPause = true,
+    this.pauseFocusable = true,
   });
 
   final Tetromino? holdPiece;
@@ -2147,6 +2208,7 @@ class _CompactTopBar extends StatelessWidget {
   final bool paused;
   final VoidCallback onPause;
   final bool showPause;
+  final bool pauseFocusable;
 
   @override
   Widget build(BuildContext context) {
@@ -2178,7 +2240,12 @@ class _CompactTopBar extends StatelessWidget {
             _TopPieceSlot(title: 'NEXT', piece: nextPiece),
             if (showPause) ...[
               const SizedBox(width: 8),
-              _TopControls(paused: paused, framed: false, onPause: onPause),
+              _TopControls(
+                paused: paused,
+                framed: false,
+                onPause: onPause,
+                focusable: pauseFocusable,
+              ),
             ],
           ],
         ),
@@ -2271,24 +2338,32 @@ class _TopControls extends StatelessWidget {
     required this.paused,
     required this.onPause,
     this.framed = true,
+    this.focusable = true,
   });
 
   final bool paused;
   final VoidCallback onPause;
   final bool framed;
 
+  /// False while a menu overlay covers the HUD, so controller focus
+  /// traversal cannot land on the hidden pause button behind it.
+  final bool focusable;
+
   @override
   Widget build(BuildContext context) {
-    final controls = Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _ControlButton(
-          tooltip: paused ? 'Resume' : 'Pause',
-          icon: paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
-          size: framed ? 44 : 42,
-          onPressed: onPause,
-        ),
-      ],
+    final controls = ExcludeFocus(
+      excluding: !focusable,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _ControlButton(
+            tooltip: paused ? 'Resume' : 'Pause',
+            icon: paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
+            size: framed ? 44 : 42,
+            onPressed: onPause,
+          ),
+        ],
+      ),
     );
 
     if (!framed) {
@@ -2305,12 +2380,14 @@ class _ControlButton extends StatelessWidget {
     required this.icon,
     required this.onPressed,
     this.size = 44,
+    this.autofocus = false,
   });
 
   final String tooltip;
   final IconData icon;
   final VoidCallback onPressed;
   final double size;
+  final bool autofocus;
 
   @override
   Widget build(BuildContext context) {
@@ -2321,6 +2398,7 @@ class _ControlButton extends StatelessWidget {
         child: IconButton.filledTonal(
           visualDensity: VisualDensity.compact,
           icon: Icon(icon),
+          autofocus: autofocus,
           onPressed: onPressed,
         ),
       ),
@@ -2420,6 +2498,8 @@ class _GameOverlay extends StatelessWidget {
                       _ControlButton(
                         tooltip: 'Resume',
                         icon: Icons.play_arrow_rounded,
+                        // Pre-focused so a controller can confirm instantly.
+                        autofocus: true,
                         onPressed: onResume,
                       ),
                       const SizedBox(width: 8),
@@ -2427,6 +2507,7 @@ class _GameOverlay extends StatelessWidget {
                     _ControlButton(
                       tooltip: 'Restart',
                       icon: Icons.restart_alt_rounded,
+                      autofocus: gameOver,
                       onPressed: onRestart,
                     ),
                     const SizedBox(width: 8),
@@ -2543,19 +2624,60 @@ class _VolumeSlider extends StatelessWidget {
             thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
             overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
           ),
-          child: Slider(
-            key: sliderKey,
-            value: value,
-            min: 0,
-            max: max,
-            divisions: (max * 20).round(),
-            semanticFormatterCallback: (sliderValue) =>
-                '${(sliderValue * 100).round()}%',
-            onChanged: onChanged,
+          // The gamepad UI navigator dispatches DirectionalFocusIntents at
+          // the focused widget; a focused slider consumes left/right as a
+          // one-division adjustment and forwards up/down to normal focus
+          // traversal (Actions resolution stops at the first matching type,
+          // so this action must handle every direction itself).
+          child: Actions(
+            actions: <Type, Action<Intent>>{
+              DirectionalFocusIntent: _SliderGamepadAdjustAction(
+                value: value,
+                max: max,
+                onChanged: onChanged,
+              ),
+            },
+            child: Slider(
+              key: sliderKey,
+              value: value,
+              min: 0,
+              max: max,
+              divisions: (max * 20).round(),
+              semanticFormatterCallback: (sliderValue) =>
+                  '${(sliderValue * 100).round()}%',
+              onChanged: onChanged,
+            ),
           ),
         ),
       ],
     );
+  }
+}
+
+class _SliderGamepadAdjustAction extends Action<DirectionalFocusIntent> {
+  _SliderGamepadAdjustAction({
+    required this.value,
+    required this.max,
+    required this.onChanged,
+  });
+
+  final double value;
+  final double max;
+  final ValueChanged<double> onChanged;
+
+  @override
+  void invoke(DirectionalFocusIntent intent) {
+    switch (intent.direction) {
+      case TraversalDirection.left || TraversalDirection.right:
+        // One slider division per press, matching the arrow-key step.
+        final step = max / (max * 20).round();
+        final delta = intent.direction == TraversalDirection.right
+            ? step
+            : -step;
+        onChanged((value + delta).clamp(0.0, max).toDouble());
+      case TraversalDirection.up || TraversalDirection.down:
+        FocusManager.instance.primaryFocus?.focusInDirection(intent.direction);
+    }
   }
 }
 

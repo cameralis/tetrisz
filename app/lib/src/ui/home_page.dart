@@ -60,6 +60,8 @@ class HomePage extends StatelessWidget {
                   const SizedBox(height: 40),
                   FilledButton(
                     key: const ValueKey('home-play'),
+                    // Pre-focused so a controller can start with one press.
+                    autofocus: true,
                     style: FilledButton.styleFrom(
                       backgroundColor: _accentColor,
                       foregroundColor: const Color(0xFF07080A),

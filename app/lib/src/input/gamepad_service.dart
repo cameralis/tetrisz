@@ -48,6 +48,24 @@ class GamepadService {
   final _controller = StreamController<GamepadControlEvent>.broadcast();
   final _pressedByPad = <String, Set<GamepadControl>>{};
   StreamSubscription<NormalizedGamepadEvent>? _subscription;
+  int _uiNavigationBlocks = 0;
+
+  /// While true, the controller belongs to gameplay (or a binding-capture
+  /// dialog) and the UI focus navigator must ignore its events.
+  bool get uiNavigationBlocked => _uiNavigationBlocks > 0;
+
+  /// Claims the controller for gameplay-style consumption. Balanced by
+  /// [unblockUiNavigation]; claims nest so a capture dialog opened over a
+  /// paused game cannot release the game page's claim early.
+  void blockUiNavigation() {
+    _uiNavigationBlocks += 1;
+  }
+
+  void unblockUiNavigation() {
+    if (_uiNavigationBlocks > 0) {
+      _uiNavigationBlocks -= 1;
+    }
+  }
 
   static const _buttonControls = <GamepadButton, GamepadControl>{
     GamepadButton.a: GamepadControl.buttonSouth,

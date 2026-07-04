@@ -256,6 +256,9 @@ class _BindingCaptureDialogState extends State<_BindingCaptureDialog> {
   @override
   void initState() {
     super.initState();
+    // The press being captured must not double as UI navigation (moving
+    // focus or activating buttons behind the dialog).
+    widget.gamepad.blockUiNavigation();
     _subscription = widget.gamepad.controlEvents.listen((event) {
       if (event.pressed && mounted) {
         Navigator.of(context).pop(event.control);
@@ -265,6 +268,7 @@ class _BindingCaptureDialogState extends State<_BindingCaptureDialog> {
 
   @override
   void dispose() {
+    widget.gamepad.unblockUiNavigation();
     unawaited(_subscription?.cancel() ?? Future.value());
     super.dispose();
   }

@@ -347,6 +347,8 @@ class VersusResultOverlay extends StatelessWidget {
                       valueListenable: session.localWantsRematch,
                       builder: (context, waiting, _) {
                         return FilledButton(
+                          // Pre-focused so a controller can confirm instantly.
+                          autofocus: true,
                           onPressed: waiting ? null : session.requestRematch,
                           child: Text(
                             waiting ? 'Waiting for opponent…' : 'Rematch',
