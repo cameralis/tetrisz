@@ -3,8 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import '../input/gamepad_service.dart';
 import '../net/net_config.dart';
 import '../net/rtc_session.dart';
+import 'controls_page.dart';
 
 const _textColor = Color(0xFFF3F6FA);
 const _mutedTextColor = Color(0xFFA5ADBA);
@@ -17,7 +19,10 @@ const _panelColor = Color(0xFF1B1D22);
 /// likely to work from this network? Also shows the live match transport
 /// when opened during a game (via the session-aware tile values pushed in).
 class DiagnosticsPage extends StatefulWidget {
-  const DiagnosticsPage({super.key});
+  const DiagnosticsPage({super.key, this.gamepad});
+
+  /// Optional gamepad service, surfaced here for input diagnostics.
+  final GamepadService? gamepad;
 
   @override
   State<DiagnosticsPage> createState() => _DiagnosticsPageState();
@@ -111,6 +116,33 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            const _SectionHeader('CONTROLS'),
+            Card(
+              color: _panelColor,
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                key: const ValueKey('open-controls'),
+                leading: const Icon(Icons.sports_esports, color: _accentColor),
+                title: const Text(
+                  'Controller & touch bindings',
+                  style: TextStyle(color: _textColor, fontSize: 14),
+                ),
+                subtitle: const Text(
+                  'Xbox / PlayStation gamepads and touch gestures',
+                  style: TextStyle(color: _mutedTextColor, fontSize: 12),
+                ),
+                trailing: const Icon(
+                  Icons.chevron_right,
+                  color: _mutedTextColor,
+                ),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => ControlsPage(gamepad: widget.gamepad),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
             const _SectionHeader('CONNECTIVITY'),
             _DiagnosticTile(
               title: 'Matchmaking backend',

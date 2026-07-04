@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../input/gamepad_service.dart';
 import 'diagnostics_page.dart';
 import 'leaderboard_page.dart';
 import 'lobby_page.dart';
@@ -18,12 +19,14 @@ class HomePage extends StatelessWidget {
     this.musicPlayer,
     this.soundEffects,
     this.haptics,
+    this.gamepad,
   });
 
   final bool enableAudio;
   final TetrisMusicPlayer? musicPlayer;
   final TetrisSoundEffects? soundEffects;
   final TetrisHaptics? haptics;
+  final GamepadService? gamepad;
 
   @override
   Widget build(BuildContext context) {
@@ -69,6 +72,7 @@ class HomePage extends StatelessWidget {
                           musicPlayer: musicPlayer,
                           soundEffects: soundEffects,
                           haptics: haptics,
+                          gamepad: gamepad,
                         ),
                       ),
                     ),
@@ -95,6 +99,7 @@ class HomePage extends StatelessWidget {
                           musicPlayer: musicPlayer,
                           soundEffects: soundEffects,
                           haptics: haptics,
+                          gamepad: gamepad,
                         ),
                       ),
                     ),
@@ -132,7 +137,7 @@ class HomePage extends StatelessWidget {
                     key: const ValueKey('home-diagnostics'),
                     onPressed: () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
-                        builder: (_) => const DiagnosticsPage(),
+                        builder: (_) => DiagnosticsPage(gamepad: gamepad),
                       ),
                     ),
                     child: const Text(

@@ -39,6 +39,7 @@ dependencies:
   web_socket_channel: ^3.0.3
   http: ^1.6.0
   flutter_webrtc: ^1.5.2
+  gamepads: ^0.1.10+4
 
 dev_dependencies:
   flutter_test:

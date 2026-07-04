@@ -11,6 +11,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../game/tetris_game.dart';
 import '../game/tetromino.dart';
+import '../input/control_bindings.dart';
+import '../input/das_repeater.dart';
+import '../input/gamepad_service.dart';
 import '../net/leaderboard_client.dart';
 import '../net/versus_session.dart';
 import 'board_painting.dart';
@@ -63,6 +66,13 @@ const _sfxVolumePreferenceKey = 'tetris.sfxVolume';
 const tetrisHighScorePreferenceKey = 'tetris.highScore';
 @visibleForTesting
 const tetrisSavedGamePreferenceKey = 'tetris.savedGame';
+// Bumped when scoring rules change enough that old high scores are not
+// comparable (era 2: guideline T-spin mini values + hard-drop no longer
+// preserving T-spin detection). High scores from older eras are discarded.
+@visibleForTesting
+const tetrisScoringEraPreferenceKey = 'tetris.scoringEra';
+@visibleForTesting
+const tetrisCurrentScoringEra = 2;
 const _movementSfxStartGap = Duration(milliseconds: 55);
 const _rotationSfxStartGap = Duration(milliseconds: 35);
 const _boardAspectRatio =
@@ -295,6 +305,7 @@ class TetrisApp extends StatelessWidget {
     this.musicPlayer,
     this.soundEffects,
     this.haptics,
+    this.gamepad,
   });
 
   final bool enableAudio;
@@ -302,6 +313,10 @@ class TetrisApp extends StatelessWidget {
   final TetrisMusicPlayer? musicPlayer;
   final TetrisSoundEffects? soundEffects;
   final TetrisHaptics? haptics;
+
+  /// Gamepad input source; `null` disables controller support (widget tests
+  /// must not touch the platform event channel).
+  final GamepadService? gamepad;
 
   @override
   Widget build(BuildContext context) {
@@ -330,12 +345,14 @@ class TetrisApp extends StatelessWidget {
               musicPlayer: musicPlayer,
               soundEffects: soundEffects,
               haptics: haptics,
+              gamepad: gamepad,
             )
           : HomePage(
               enableAudio: enableAudio,
               musicPlayer: musicPlayer,
               soundEffects: soundEffects,
               haptics: haptics,
+              gamepad: gamepad,
             ),
     );
   }
@@ -349,6 +366,7 @@ class TetrisGamePage extends StatefulWidget {
     this.musicPlayer,
     this.soundEffects,
     this.haptics,
+    this.gamepad,
     this.versusSession,
   });
 
@@ -357,6 +375,9 @@ class TetrisGamePage extends StatefulWidget {
   final TetrisMusicPlayer? musicPlayer;
   final TetrisSoundEffects? soundEffects;
   final TetrisHaptics? haptics;
+
+  /// Gamepad input source; `null` disables controller support.
+  final GamepadService? gamepad;
 
   /// When set, this page runs a 1v1 match: the session owns the seeded game,
   /// persistence and pause are disabled, and versus overlays render on top of
@@ -382,6 +403,10 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   Future<void>? _preferencesFuture;
   TetrisMusicPlayer? _musicPlayer;
   StreamSubscription<void>? _musicCompleteSubscription;
+  StreamSubscription<GamepadControlEvent>? _gamepadSubscription;
+  GamepadBindings _gamepadBindings = GamepadBindings.guideline();
+  TouchBindings _touchBindings = TouchBindings.defaults();
+  final DasRepeater _dasRepeater = DasRepeater();
 
   Duration _lastFrameElapsed = Duration.zero;
   int? _dragPointer;
@@ -439,6 +464,9 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       _disposeSoundEffects = false;
     }
     _haptics = widget.haptics ?? const PlatformTetrisHaptics();
+    _gamepadSubscription = widget.gamepad?.controlEvents.listen(
+      _onGamepadControl,
+    );
     _ticker = createTicker(_onFrame)..start();
     _snapBackController =
         AnimationController(vsync: this, duration: _snapBackDuration)
@@ -496,6 +524,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _lineClearController.dispose();
     _boardImpactController.dispose();
     _ticker.dispose();
+    unawaited(_gamepadSubscription?.cancel() ?? Future.value());
     unawaited(_musicCompleteSubscription?.cancel() ?? Future.value());
     if (_disposeSoundEffects) {
       _soundEffects.dispose();
@@ -677,6 +706,14 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       return;
     }
 
+    // Held gamepad directions auto-repeat here; skipping the poll while the
+    // board is blocked (above) freezes the DAS charge instead of flushing a
+    // burst of queued shifts on resume.
+    final dasShifts = _dasRepeater.poll(delta);
+    for (var i = 0; i < dasShifts; i += 1) {
+      _moveOnceWithFeedback(_dasRepeater.activeDirection);
+    }
+
     final before = _SoundSnapshot.fromGame(_game);
     final beforeY = _game.active?.y;
     _game.tick(delta);
@@ -702,15 +739,33 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   Future<void> _loadPreferences() async {
     try {
       final preferences = await SharedPreferences.getInstance();
+      // One-time migration: high scores earned under pre-rebalance scoring
+      // (inflated T-spin values) are not comparable, so drop them.
+      final scoringEra = preferences.getInt(tetrisScoringEraPreferenceKey) ?? 1;
+      if (scoringEra < tetrisCurrentScoringEra) {
+        await preferences.remove(tetrisHighScorePreferenceKey);
+        await preferences.setInt(
+          tetrisScoringEraPreferenceKey,
+          tetrisCurrentScoringEra,
+        );
+      }
       final musicVolume = preferences.getDouble(_musicVolumePreferenceKey);
       final sfxVolume = preferences.getDouble(_sfxVolumePreferenceKey);
       final highScore = preferences.getInt(tetrisHighScorePreferenceKey);
       final savedGame = preferences.getString(tetrisSavedGamePreferenceKey);
+      final gamepadBindings = GamepadBindings.decode(
+        preferences.getString(tetrisGamepadBindingsPreferenceKey),
+      );
+      final touchBindings = TouchBindings.decode(
+        preferences.getString(tetrisTouchBindingsPreferenceKey),
+      );
       if (!mounted) {
         return;
       }
 
       setState(() {
+        _gamepadBindings = gamepadBindings;
+        _touchBindings = touchBindings;
         if (musicVolume != null) {
           _musicVolume = musicVolume.clamp(0.0, 1.0).toDouble();
         }
@@ -1270,6 +1325,99 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     );
   }
 
+  void _moveOnceWithFeedback(int direction) {
+    if (direction == 0 || !_boardAcceptsInput) {
+      return;
+    }
+    _runGameAction<bool>(
+      () => direction < 0 ? _game.moveLeft() : _game.moveRight(),
+      successSfx: TetrisSfx.slide,
+      successHaptic: TetrisHaptic.move,
+      didSucceed: (moved, _) => moved,
+    );
+  }
+
+  void _onGamepadControl(GamepadControlEvent event) {
+    final action = _gamepadBindings.actionFor(event.control);
+    if (action == null) {
+      return;
+    }
+    if (event.pressed) {
+      _onGamepadActionPressed(action);
+    } else {
+      _onGamepadActionReleased(action);
+    }
+  }
+
+  void _onGamepadActionPressed(GameAction action) {
+    switch (action) {
+      case GameAction.moveLeft:
+        _dasRepeater.press(-1);
+        _moveOnceWithFeedback(-1);
+      case GameAction.moveRight:
+        _dasRepeater.press(1);
+        _moveOnceWithFeedback(1);
+      case GameAction.softDrop:
+        _startSoftDrop();
+      case GameAction.hardDrop:
+        _hardDrop();
+      case GameAction.rotateClockwise:
+        _rotateClockwise();
+      case GameAction.rotateCounterClockwise:
+        _rotateCounterClockwise();
+      case GameAction.hold:
+        _runAction(_game.hold);
+      case GameAction.pause:
+        if (_game.gameOver && widget.versusSession == null) {
+          _restart();
+        } else {
+          _togglePause();
+        }
+    }
+  }
+
+  void _onGamepadActionReleased(GameAction action) {
+    switch (action) {
+      case GameAction.moveLeft:
+        _dasRepeater.release(-1);
+      case GameAction.moveRight:
+        _dasRepeater.release(1);
+      case GameAction.softDrop:
+        _stopSoftDrop();
+      case GameAction.hardDrop:
+      case GameAction.rotateClockwise:
+      case GameAction.rotateCounterClockwise:
+      case GameAction.hold:
+      case GameAction.pause:
+        break;
+    }
+  }
+
+  /// Runs a momentary (tap/swipe) touch action. Sustained soft drop is only
+  /// meaningful for held inputs, so here it performs a single step.
+  void _performTouchAction(GameAction? action) {
+    switch (action) {
+      case null:
+        break;
+      case GameAction.moveLeft:
+        _moveOnceWithFeedback(-1);
+      case GameAction.moveRight:
+        _moveOnceWithFeedback(1);
+      case GameAction.softDrop:
+        _softDropStep();
+      case GameAction.hardDrop:
+        _hardDrop();
+      case GameAction.rotateClockwise:
+        _rotateClockwise();
+      case GameAction.rotateCounterClockwise:
+        _rotateCounterClockwise();
+      case GameAction.hold:
+        _runAction(_game.hold);
+      case GameAction.pause:
+        _togglePause();
+    }
+  }
+
   void _handlePointerMove(PointerMoveEvent event, double cellSize) {
     if (_dragPointer != event.pointer) {
       return;
@@ -1376,11 +1524,10 @@ class _TetrisGamePageState extends State<TetrisGamePage>
         _dragY.abs() > _dragX.abs()) {
       _snapBackController.stop();
       _resetSnapOffsets();
-      if (_dragY < 0) {
-        _runAction(_game.hold);
-      } else {
-        _hardDrop();
-      }
+      final gesture = _dragY < 0
+          ? TouchGesture.swipeUp
+          : TouchGesture.swipeDown;
+      _performTouchAction(_touchBindings.actionFor(gesture));
     } else {
       _animateSnapBack();
     }
@@ -1503,22 +1650,40 @@ class _TetrisGamePageState extends State<TetrisGamePage>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final compact =
-                constraints.maxWidth < 760 || constraints.maxHeight < 500;
+    // Block the iOS edge-swipe / Android back gesture: an accidental pop
+    // mid-round would silently abandon the game (and forfeit a versus
+    // match). Leaving is always an explicit button: the pause/game-over
+    // menu in solo, the result overlay in versus.
+    return PopScope(
+      canPop: false,
+      child: Scaffold(
+        body: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final compact =
+                  constraints.maxWidth < 760 || constraints.maxHeight < 500;
 
-            if (compact) {
-              return _buildCompactLayout(constraints);
-            }
+              if (compact) {
+                return _buildCompactLayout(constraints);
+              }
 
-            return _buildWideLayout(constraints);
-          },
+              return _buildWideLayout(constraints);
+            },
+          ),
         ),
       ),
     );
+  }
+
+  /// Persists the round (solo only; no-op for finished games) and returns to
+  /// the home menu. Bypasses [PopScope] deliberately: this is the one
+  /// sanctioned exit.
+  void _exitToMenu() {
+    unawaited(_persistGameState());
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) {
+      navigator.pop();
+    }
   }
 
   Widget _buildWideLayout(BoxConstraints constraints) {
@@ -1658,15 +1823,23 @@ class _TetrisGamePageState extends State<TetrisGamePage>
               if (!_boardAcceptsInput) {
                 return;
               }
-              if (details.localPosition.dx > constraints.maxWidth / 2) {
-                _rotateClockwise();
-              } else {
-                _rotateCounterClockwise();
-              }
+              final gesture =
+                  details.localPosition.dx > constraints.maxWidth / 2
+                  ? TouchGesture.tapRight
+                  : TouchGesture.tapLeft;
+              _performTouchAction(_touchBindings.actionFor(gesture));
             },
             onLongPressStart: (_) {
-              if (_boardAcceptsInput && !_horizontalDragLocked) {
+              if (!_boardAcceptsInput || _horizontalDragLocked) {
+                return;
+              }
+              final action = _touchBindings.actionFor(TouchGesture.longPress);
+              if (action == GameAction.softDrop) {
+                // The one sustained touch action: drop for as long as the
+                // press is held.
                 _startSoftDrop();
+              } else {
+                _performTouchAction(action);
               }
             },
             onLongPressEnd: (_) => _stopSoftDrop(),
@@ -1714,6 +1887,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
               onSfxVolumeChanged: _setSfxVolume,
               onRestart: _restart,
               onResume: _togglePause,
+              onMenu: _exitToMenu,
             ),
         ],
       ),
@@ -1734,11 +1908,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
         width: boardWidth * 0.30,
         child: OpponentBoardView(session: session),
       ),
-      Positioned(
-        left: 12,
-        bottom: 8,
-        child: TransportChip(session: session),
-      ),
+      Positioned(left: 12, bottom: 8, child: TransportChip(session: session)),
       if (session.phase.value == VersusPhase.countdown)
         CountdownOverlay(
           key: ValueKey('countdown-${session.matchId}'),
@@ -1747,10 +1917,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       if (session.phase.value == VersusPhase.won ||
           session.phase.value == VersusPhase.lost ||
           session.phase.value == VersusPhase.opponentLeft)
-        VersusResultOverlay(
-          session: session,
-          onLeave: () => Navigator.of(context).maybePop(),
-        ),
+        VersusResultOverlay(session: session, onLeave: _exitToMenu),
     ];
   }
 }
@@ -2088,6 +2255,7 @@ class _GameOverlay extends StatelessWidget {
     required this.onSfxVolumeChanged,
     required this.onRestart,
     required this.onResume,
+    required this.onMenu,
   });
 
   final bool gameOver;
@@ -2099,6 +2267,7 @@ class _GameOverlay extends StatelessWidget {
   final ValueChanged<double> onSfxVolumeChanged;
   final VoidCallback onRestart;
   final VoidCallback onResume;
+  final VoidCallback onMenu;
 
   @override
   Widget build(BuildContext context) {
@@ -2175,6 +2344,12 @@ class _GameOverlay extends StatelessWidget {
                       tooltip: 'Restart',
                       icon: Icons.restart_alt_rounded,
                       onPressed: onRestart,
+                    ),
+                    const SizedBox(width: 8),
+                    _ControlButton(
+                      tooltip: 'Menu',
+                      icon: Icons.home_rounded,
+                      onPressed: onMenu,
                     ),
                   ],
                 ),
@@ -2807,4 +2982,3 @@ ui.Color tetrisGhostHdrOutlineColorFor(Tetromino type) {
     ),
   };
 }
-

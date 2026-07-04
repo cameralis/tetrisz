@@ -3,11 +3,14 @@ PODS:
   - flutter_webrtc (1.4.0):
     - Flutter
     - WebRTC-SDK (= 144.7559.09)
+  - gamepads_ios (0.1.1):
+    - Flutter
   - WebRTC-SDK (144.7559.09)
 
 DEPENDENCIES:
   - Flutter (from `Flutter`)
   - flutter_webrtc (from `.symlinks/plugins/flutter_webrtc/ios`)
+  - gamepads_ios (from `.symlinks/plugins/gamepads_ios/ios`)
 
 SPEC REPOS:
   trunk:
@@ -18,10 +21,13 @@ EXTERNAL SOURCES:
     :path: Flutter
   flutter_webrtc:
     :path: ".symlinks/plugins/flutter_webrtc/ios"
+  gamepads_ios:
+    :path: ".symlinks/plugins/gamepads_ios/ios"
 
 SPEC CHECKSUMS:
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
   flutter_webrtc: 3ee86aa10e0313c38c93fdb215dd86e77014f96a
+  gamepads_ios: c75c6d31377d275b0effb9174c619e2705678c09
   WebRTC-SDK: e6006119cd730d6315d875e4a421b6cc8bb88833
 
 PODFILE CHECKSUM: 28562fbdbaff97ee873ff559cebf1c23e97d0738

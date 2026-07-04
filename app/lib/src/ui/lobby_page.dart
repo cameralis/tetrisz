@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../input/gamepad_service.dart';
 import '../net/protocol.dart';
 import '../net/room_client.dart';
 import '../net/rtc_session.dart';
@@ -25,12 +26,14 @@ class LobbyPage extends StatefulWidget {
     this.musicPlayer,
     this.soundEffects,
     this.haptics,
+    this.gamepad,
   });
 
   final bool enableAudio;
   final TetrisMusicPlayer? musicPlayer;
   final TetrisSoundEffects? soundEffects;
   final TetrisHaptics? haptics;
+  final GamepadService? gamepad;
 
   @override
   State<LobbyPage> createState() => _LobbyPageState();
@@ -137,6 +140,7 @@ class _LobbyPageState extends State<LobbyPage> {
               musicPlayer: widget.musicPlayer,
               soundEffects: widget.soundEffects,
               haptics: widget.haptics,
+              gamepad: widget.gamepad,
               versusSession: session,
             ),
           ),
@@ -181,9 +185,7 @@ class _LobbyPageState extends State<LobbyPage> {
           ),
           onPressed: _stage == _LobbyStage.connecting ? null : _createRoom,
           child: Text(
-            _stage == _LobbyStage.connecting
-                ? 'Creating…'
-                : 'Create match',
+            _stage == _LobbyStage.connecting ? 'Creating…' : 'Create match',
             style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
           ),
         ),

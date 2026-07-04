@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:tetris/src/input/control_bindings.dart';
 import 'package:tetris/src/ui/tetris_app.dart';
 
 /// Live end-to-end drive of the real app: home menu -> game -> gestures.
@@ -17,7 +19,9 @@ Future<void> _stage(
   String name,
 ) async {
   if (_markerDir.isNotEmpty) {
-    File('$_markerDir/$name').writeAsStringSync('');
+    File('$_markerDir/$name')
+      ..parent.createSync(recursive: true)
+      ..writeAsStringSync('');
   }
   try {
     await binding.takeScreenshot(name);
@@ -52,6 +56,15 @@ void main() {
   binding.framePolicy = LiveTestWidgetsFlutterBindingFramePolicy.fullyLive;
 
   testWidgets('guideline gameplay end-to-end on the real app', (tester) async {
+    // The sandboxed app keeps real preferences between runs; a saved game
+    // from an earlier drive would boot the board paused on its restore
+    // overlay, and leftover custom bindings would change the gestures under
+    // test. Start every drive from the shipped defaults.
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.remove(tetrisSavedGamePreferenceKey);
+    await preferences.remove(tetrisGamepadBindingsPreferenceKey);
+    await preferences.remove(tetrisTouchBindingsPreferenceKey);
+
     await tester.pumpWidget(const TetrisApp(enableAudio: false));
     await tester.pump(const Duration(milliseconds: 800));
 

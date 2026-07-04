@@ -762,9 +762,40 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('discards high scores from an older scoring era', (
+    tester,
+  ) async {
+    _usePhoneViewport(tester);
+    // No scoring-era key: simulates a device that recorded this high score
+    // under the pre-rebalance (inflated T-spin) scoring rules.
+    SharedPreferences.setMockInitialValues({tetrisHighScorePreferenceKey: 10});
+    final game = _visiblePieceGame(Tetromino.t);
+
+    await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
+    await _flushPreferenceTasks(tester);
+
+    await tester.tap(find.byTooltip('Pause'));
+    await tester.pump();
+
+    expect(find.text('HIGH SCORE'), findsOneWidget);
+    expect(find.text('10'), findsNothing);
+    expect(find.text('0'), findsWidgets);
+
+    final preferences = await SharedPreferences.getInstance();
+    expect(preferences.getInt(tetrisHighScorePreferenceKey), isNull);
+    expect(
+      preferences.getInt(tetrisScoringEraPreferenceKey),
+      tetrisCurrentScoringEra,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('pause menu shows and persists high score', (tester) async {
     _usePhoneViewport(tester);
-    SharedPreferences.setMockInitialValues({tetrisHighScorePreferenceKey: 10});
+    SharedPreferences.setMockInitialValues({
+      tetrisHighScorePreferenceKey: 10,
+      tetrisScoringEraPreferenceKey: tetrisCurrentScoringEra,
+    });
     final game = _visiblePieceGame(Tetromino.t);
 
     await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
