@@ -49,6 +49,8 @@ const tetrisLineClearSnapParticleGlowBoost = 0.55;
 const _horizontalIntentFraction = 0.35;
 const _minHorizontalIntentDistance = 20.0;
 const _minGestureCellSize = 36.0;
+const _wideSidePanelWidth = 148.0;
+const _wideSidePanelGap = 16.0;
 const _snapPreviewFraction = 0.25;
 const _snapCommitFraction = 0.7;
 const _snapBlockedFraction = 0.22;
@@ -380,7 +382,6 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   Future<void>? _preferencesFuture;
   TetrisMusicPlayer? _musicPlayer;
   StreamSubscription<void>? _musicCompleteSubscription;
-  Timer? _softDropTimer;
 
   Duration _lastFrameElapsed = Duration.zero;
   int? _dragPointer;
@@ -490,7 +491,6 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       session.opponent.removeListener(_onVersusStateChanged);
       unawaited(session.dispose());
     }
-    _softDropTimer?.cancel();
     _lineClearSnapImage?.dispose();
     _snapBackController.dispose();
     _lineClearController.dispose();
@@ -633,7 +633,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     if (_game.gameOver || _game.paused) {
       return;
     }
-    _softDropTimer?.cancel();
+    _game.setSoftDropping(false);
     if (mounted) {
       setState(() {
         _game.paused = true;
@@ -678,8 +678,16 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     }
 
     final before = _SoundSnapshot.fromGame(_game);
+    final beforeY = _game.active?.y;
     _game.tick(delta);
     _recordHighScoreIfNeeded();
+    if (_game.softDropping &&
+        _game.lockCount == before.lockCount &&
+        beforeY != null &&
+        (_game.active?.y ?? beforeY) > beforeY) {
+      // Engine-driven soft drop rows; the sfx layer rate-limits repeats.
+      _playSfx(TetrisSfx.softDrop);
+    }
     final lineClearSnapshot = _lineClearSnapshotAfter(before);
     _playPostActionSfx(before);
     if (mounted) {
@@ -1150,19 +1158,17 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   }
 
   void _startSoftDrop() {
-    _softDropTimer?.cancel();
+    if (!_boardAcceptsInput) {
+      return;
+    }
+    // One immediate step for responsiveness; from here the engine falls at
+    // the guideline soft drop speed (20x gravity) until the press ends.
     _softDropStep();
-    _softDropTimer = Timer.periodic(const Duration(milliseconds: 45), (_) {
-      if (!mounted) {
-        return;
-      }
-      _softDropStep();
-    });
+    _game.setSoftDropping(true);
   }
 
   void _stopSoftDrop() {
-    _softDropTimer?.cancel();
-    _softDropTimer = null;
+    _game.setSoftDropping(false);
   }
 
   void _softDropStep() {
@@ -1516,21 +1522,68 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   }
 
   Widget _buildWideLayout(BoxConstraints constraints) {
+    const sideColumnWidth = _wideSidePanelWidth + _wideSidePanelGap;
     final boardHeight = math.min(constraints.maxHeight, 760.0);
-    final boardWidth = math.min(
-      constraints.maxWidth,
-      boardHeight * _boardAspectRatio,
+    final maxBoardWidth = math.max(
+      0.0,
+      constraints.maxWidth - 2 * sideColumnWidth,
     );
+    final boardWidth = math.min(maxBoardWidth, boardHeight * _boardAspectRatio);
     final resolvedBoardHeight = boardWidth / _boardAspectRatio;
     final cellSize = _cellSizeFor(boardWidth, resolvedBoardHeight);
     final gestureCellSize = _gestureCellSizeFor(cellSize);
 
+    // The side panels live outside the gesture surface so button taps can
+    // never double as piece drags; the board area between them keeps the
+    // whole-surface gesture behavior of the compact layout.
     return SizedBox.expand(
-      child: _buildGestureSurface(
-        cellSize: gestureCellSize,
-        child: Center(
-          child: _buildBoardCanvas(boardWidth, resolvedBoardHeight),
-        ),
+      child: Row(
+        children: [
+          SizedBox(
+            key: const ValueKey('wide-left-panel'),
+            width: sideColumnWidth,
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.only(left: _wideSidePanelGap),
+                child: SizedBox(
+                  width: _wideSidePanelWidth,
+                  height: resolvedBoardHeight,
+                  child: _WideLeftColumn(
+                    holdPiece: _game.holdPiece,
+                    score: _game.score,
+                    level: _game.level,
+                    lines: _game.lines,
+                    paused: _game.paused,
+                    showPause: widget.versusSession == null,
+                    onPause: _togglePause,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: _buildGestureSurface(
+              cellSize: gestureCellSize,
+              child: Center(
+                child: _buildBoardCanvas(boardWidth, resolvedBoardHeight),
+              ),
+            ),
+          ),
+          SizedBox(
+            key: const ValueKey('wide-right-panel'),
+            width: sideColumnWidth,
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.only(right: _wideSidePanelGap),
+                child: SizedBox(
+                  width: _wideSidePanelWidth,
+                  height: resolvedBoardHeight,
+                  child: _WideNextColumn(pieces: _game.nextQueue),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1699,6 +1752,127 @@ class _TetrisGamePageState extends State<TetrisGamePage>
           onLeave: () => Navigator.of(context).maybePop(),
         ),
     ];
+  }
+}
+
+class _WideLeftColumn extends StatelessWidget {
+  const _WideLeftColumn({
+    required this.holdPiece,
+    required this.score,
+    required this.level,
+    required this.lines,
+    required this.paused,
+    required this.showPause,
+    required this.onPause,
+  });
+
+  final Tetromino? holdPiece;
+  final int score;
+  final int level;
+  final int lines;
+  final bool paused;
+  final bool showPause;
+  final VoidCallback onPause;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _Panel(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const _PanelLabel('HOLD'),
+              const SizedBox(height: 10),
+              Center(
+                child: SizedBox.square(
+                  dimension: 64,
+                  child: holdPiece == null
+                      ? const Center(
+                          child: Text('-', style: TextStyle(color: _mutedText)),
+                        )
+                      : CustomPaint(painter: _PiecePreviewPainter(holdPiece!)),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        _Panel(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _Metric(label: 'SCORE', value: score.toString()),
+              const SizedBox(height: 12),
+              _Metric(label: 'LEVEL', value: level.toString()),
+              const SizedBox(height: 12),
+              _Metric(label: 'LINES', value: lines.toString()),
+            ],
+          ),
+        ),
+        const Spacer(),
+        if (showPause)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: _TopControls(paused: paused, onPause: onPause),
+          ),
+      ],
+    );
+  }
+}
+
+class _WideNextColumn extends StatelessWidget {
+  const _WideNextColumn({required this.pieces});
+
+  final List<Tetromino> pieces;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _Panel(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const _PanelLabel('NEXT'),
+              for (final (index, piece) in pieces.indexed) ...[
+                SizedBox(height: index == 0 ? 10 : 16),
+                Center(
+                  child: SizedBox(
+                    width: index == 0 ? 56 : 44,
+                    height: index == 0 ? 42 : 32,
+                    child: CustomPaint(painter: _PiecePreviewPainter(piece)),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PanelLabel extends StatelessWidget {
+  const _PanelLabel(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: const TextStyle(
+        color: _mutedText,
+        fontSize: 11,
+        fontWeight: FontWeight.w800,
+      ),
+    );
   }
 }
 

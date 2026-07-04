@@ -9,6 +9,7 @@ final class LineClearResult {
   const LineClearResult({
     required this.lines,
     required this.tSpin,
+    this.tSpinMini = false,
     required this.perfectClear,
     required this.backToBack,
     required this.points,
@@ -24,10 +25,17 @@ final class LineClearResult {
 
   final int lines;
   final bool tSpin;
+
+  /// True for T-spins where only one of the two corners on the pointing side
+  /// is occupied (guideline "T-Spin Mini"); implies [tSpin].
+  final bool tSpinMini;
   final bool perfectClear;
   final bool backToBack;
   final int points;
 }
+
+/// Guideline T-spin classification for a locking T piece.
+enum _TSpinKind { none, mini, full }
 
 final class BoardSnapshot {
   BoardSnapshot._(List<List<Tetromino?>> board)
@@ -79,6 +87,14 @@ final class TetrisGame {
   static const previewCount = 6;
   static const lockDelay = Duration(milliseconds: 500);
   static const moveResetLimit = 15;
+
+  /// Soft drop moves the piece at this multiple of the current gravity, per
+  /// the guideline's designated soft drop speed.
+  static const softDropSpeedFactor = 20;
+
+  /// SRS kick tables have five tests; a T-spin reached through the fifth
+  /// (index 4, the far twist used by T-spin triples) is never a mini.
+  static const _tSpinUpgradeKickIndex = 4;
   static const maxGarbagePerLock = 8;
   static const _saveVersion = 1;
   static const _maxBufferedEvents = 64;
@@ -126,6 +142,12 @@ final class TetrisGame {
   Duration _lockElapsed = Duration.zero;
   int _lockResetCount = 0;
   bool _lastActionWasRotation = false;
+  // Deepest row the active piece has reached; the move-reset budget only
+  // refills when the piece falls below it (guideline Extended Placement).
+  int _lowestReachedY = 0;
+  // Which SRS kick test placed the piece in its last successful rotation.
+  int _lastRotationKickIndex = 0;
+  bool _softDropping = false;
 
   ActivePiece? active;
   Tetromino? holdPiece;
@@ -145,6 +167,28 @@ final class TetrisGame {
     final index = (level - 1).clamp(0, _gravityFramesByLevel.length - 1);
     final frames = _gravityFramesByLevel[index];
     return Duration(milliseconds: max(16, (frames * 1000 / 60).round()));
+  }
+
+  /// Whether soft drop is currently engaged; while true the piece falls at
+  /// [softDropSpeedFactor] times gravity and scores 1 point per row.
+  bool get softDropping => _softDropping;
+
+  void setSoftDropping(bool value) {
+    if (_softDropping == value) {
+      return;
+    }
+    _softDropping = value;
+    _fallAccumulator = Duration.zero;
+  }
+
+  Duration get _fallInterval {
+    final gravity = gravityInterval;
+    if (!_softDropping) {
+      return gravity;
+    }
+    return Duration(
+      microseconds: max(1000, gravity.inMicroseconds ~/ softDropSpeedFactor),
+    );
   }
 
   List<Tetromino> get nextQueue {
@@ -176,12 +220,13 @@ final class TetrisGame {
 
   /// Garbage lines a clear sends in versus play, before cancellation against
   /// the receiver's own pending queue. [combo] is the engine's combo counter
-  /// at the time of the clear (0 = first clear in a chain).
+  /// at the time of the clear (0 = first clear in a chain). T-spin minis
+  /// attack like plain clears of the same size.
   static int attackForClear(LineClearResult clear, int combo) {
     if (clear.lines == 0) {
       return 0;
     }
-    var attack = clear.tSpin
+    var attack = clear.tSpin && !clear.tSpinMini
         ? switch (clear.lines) { 1 => 2, 2 => 4, _ => 6 }
         : switch (clear.lines) { 1 => 0, 2 => 1, 3 => 2, _ => 4 };
     if (clear.backToBack) {
@@ -263,6 +308,9 @@ final class TetrisGame {
     _lockElapsed = Duration.zero;
     _lockResetCount = 0;
     _lastActionWasRotation = false;
+    _lowestReachedY = 0;
+    _lastRotationKickIndex = 0;
+    _softDropping = false;
     active = null;
     holdPiece = null;
     canHold = true;
@@ -317,6 +365,8 @@ final class TetrisGame {
       'lockElapsedUs': _lockElapsed.inMicroseconds,
       'lockResetCount': _lockResetCount,
       'lastActionWasRotation': _lastActionWasRotation,
+      'lowestReachedY': _lowestReachedY,
+      'lastRotationKickIndex': _lastRotationKickIndex,
       'pendingGarbage': List<int>.of(_pendingGarbage),
     };
   }
@@ -380,6 +430,11 @@ final class TetrisGame {
     _lockElapsed = Duration(microseconds: json['lockElapsedUs'] as int? ?? 0);
     _lockResetCount = json['lockResetCount'] as int? ?? 0;
     _lastActionWasRotation = json['lastActionWasRotation'] as bool? ?? false;
+    // Saves from before these fields existed default conservatively: the
+    // current row counts as the lowest already reached.
+    _lowestReachedY = json['lowestReachedY'] as int? ?? active?.y ?? 0;
+    _lastRotationKickIndex = json['lastRotationKickIndex'] as int? ?? 0;
+    _softDropping = false;
     _pendingGarbage
       ..clear()
       ..addAll([
@@ -404,12 +459,13 @@ final class TetrisGame {
     }
 
     _fallAccumulator += elapsed;
-    final gravity = gravityInterval;
-    while (_fallAccumulator >= gravity) {
+    final interval = _fallInterval;
+    while (_fallAccumulator >= interval) {
       if (_tryMove(0, 1, resetLock: false)) {
-        _fallAccumulator -= gravity;
-        _lockElapsed = Duration.zero;
-        _lockResetCount = 0;
+        _fallAccumulator -= interval;
+        if (_softDropping) {
+          score += 1;
+        }
       } else {
         _fallAccumulator = Duration.zero;
         break;
@@ -421,13 +477,14 @@ final class TetrisGame {
       return;
     }
 
+    // The lock timer only accrues while grounded; going airborne (up-kick,
+    // sliding off a ledge) pauses it. It resets when the piece falls to a new
+    // lowest row or a move/rotation spends one of the 15 lock resets.
     if (_isGrounded(piece)) {
       _lockElapsed += elapsed;
       if (_lockElapsed >= lockDelay) {
         _lockActive();
       }
-    } else {
-      _lockElapsed = Duration.zero;
     }
   }
 
@@ -439,8 +496,6 @@ final class TetrisGame {
     final moved = _tryMove(0, 1, resetLock: false);
     if (moved) {
       score += 1;
-      _lockElapsed = Duration.zero;
-      _lockResetCount = 0;
     }
     return moved;
   }
@@ -453,6 +508,11 @@ final class TetrisGame {
     }
 
     final distance = ghost.y - piece.y;
+    if (distance > 0) {
+      // The drop, not the rotation, is now the piece's last action, so the
+      // lock below must not count as a T-spin.
+      _lastActionWasRotation = false;
+    }
     active = ghost;
     score += distance * 2;
     _lockActive();
@@ -502,13 +562,13 @@ final class TetrisGame {
       return false;
     }
 
+    final wasGrounded = _isGrounded(piece);
     active = moved;
     _lastActionWasRotation = false;
     if (dy > 0) {
-      _lockElapsed = Duration.zero;
-      _lockResetCount = 0;
+      _refillLockResetsIfNewLowest(moved);
     } else if (resetLock) {
-      _resetLockDelayIfGrounded();
+      _spendLockReset(wasGrounded: wasGrounded);
     }
     return true;
   }
@@ -521,25 +581,49 @@ final class TetrisGame {
 
     final from = normalizeRotation(piece.rotation);
     final to = normalizeRotation(from + direction);
-    for (final kick in _wallKicks(piece.type, from, to)) {
+    final kicks = _wallKicks(piece.type, from, to);
+    for (var kickIndex = 0; kickIndex < kicks.length; kickIndex += 1) {
+      final kick = kicks[kickIndex];
       final rotated = piece.copyWith(
         rotation: to,
         x: piece.x + kick.x,
         y: piece.y + kick.y,
       );
       if (_canPlace(rotated)) {
+        final wasGrounded = _isGrounded(piece);
         active = rotated;
         _lastActionWasRotation = true;
-        _resetLockDelayIfGrounded();
+        _lastRotationKickIndex = kickIndex;
+        if (rotated.y > _lowestReachedY) {
+          // A downward kick advances the low-water mark without refilling the
+          // reset budget: only genuine falls refill it.
+          _lowestReachedY = rotated.y;
+        }
+        _spendLockReset(wasGrounded: wasGrounded);
         return true;
       }
     }
     return false;
   }
 
-  void _resetLockDelayIfGrounded() {
+  /// Refills the move-reset budget when the piece falls below every row it
+  /// has occupied before; falling back onto already-visited rows (after an
+  /// upward kick) keeps the spent budget, so lock delay cannot be stalled
+  /// forever.
+  void _refillLockResetsIfNewLowest(ActivePiece moved) {
+    if (moved.y > _lowestReachedY) {
+      _lowestReachedY = moved.y;
+      _lockElapsed = Duration.zero;
+      _lockResetCount = 0;
+    }
+  }
+
+  /// Spends one of the 15 lock-delay resets for a move or rotation performed
+  /// in the lock phase (grounded before or after the action). Once the budget
+  /// is exhausted the timer keeps running and the piece locks when it expires.
+  void _spendLockReset({required bool wasGrounded}) {
     final piece = active;
-    if (piece == null || !_isGrounded(piece)) {
+    if (piece == null || (!wasGrounded && !_isGrounded(piece))) {
       return;
     }
     if (_lockResetCount < moveResetLimit) {
@@ -577,7 +661,7 @@ final class TetrisGame {
     final locksCompletelyAboveVisible = cells.every(
       (cell) => cell.y < bufferRows,
     );
-    final tSpin = _detectTSpin(piece);
+    final tSpinKind = _detectTSpin(piece);
 
     for (final cell in cells) {
       if (cell.y < 0 || cell.y >= totalRows) {
@@ -599,7 +683,12 @@ final class TetrisGame {
           );
     final cleared = _clearLines();
     final perfectClear = cleared > 0 && _isBoardEmpty;
-    _applyScoring(cleared, tSpin: tSpin, perfectClear: perfectClear);
+    _applyScoring(
+      cleared,
+      tSpin: tSpinKind != _TSpinKind.none,
+      tSpinMini: tSpinKind == _TSpinKind.mini,
+      perfectClear: perfectClear,
+    );
 
     if (cleared > 0) {
       final attack = attackForClear(lastClear, combo);
@@ -721,12 +810,17 @@ final class TetrisGame {
   void _applyScoring(
     int lineCount, {
     required bool tSpin,
+    required bool tSpinMini,
     required bool perfectClear,
   }) {
     final scoringLevel = level;
     final wasBackToBack = backToBack;
     final difficult = lineCount == 4 || (tSpin && lineCount > 0);
-    var points = _baseLineClearPoints(lineCount, tSpin: tSpin);
+    var points = _baseLineClearPoints(
+      lineCount,
+      tSpin: tSpin,
+      tSpinMini: tSpinMini,
+    );
 
     if (difficult && wasBackToBack) {
       points = (points * 3 / 2).round();
@@ -759,13 +853,22 @@ final class TetrisGame {
     lastClear = LineClearResult(
       lines: lineCount,
       tSpin: tSpin,
+      tSpinMini: tSpinMini,
       perfectClear: perfectClear,
       backToBack: difficult && wasBackToBack,
       points: points * scoringLevel,
     );
   }
 
-  int _baseLineClearPoints(int lineCount, {required bool tSpin}) {
+  int _baseLineClearPoints(
+    int lineCount, {
+    required bool tSpin,
+    required bool tSpinMini,
+  }) {
+    if (tSpinMini) {
+      return switch (lineCount) { 0 => 100, 1 => 200, 2 => 400, _ => 0 };
+    }
+
     if (tSpin) {
       return switch (lineCount) {
         0 => 400,
@@ -798,21 +901,51 @@ final class TetrisGame {
     };
   }
 
-  bool _detectTSpin(ActivePiece piece) {
+  /// Guideline 3-corner T-spin detection with mini classification: a T whose
+  /// last action was a rotation and that has at least three of the four
+  /// diagonal corners around its center occupied is a T-spin. It is a mini
+  /// when only one of the two corners on the pointing side (next to the nub)
+  /// is occupied, unless the rotation used the fifth SRS kick test.
+  _TSpinKind _detectTSpin(ActivePiece piece) {
     if (piece.type != Tetromino.t || !_lastActionWasRotation) {
-      return false;
+      return _TSpinKind.none;
     }
 
     final centerX = piece.x + 1;
     final centerY = piece.y + 1;
-    final corners = <GridPoint>[
-      GridPoint(centerX - 1, centerY - 1),
-      GridPoint(centerX + 1, centerY - 1),
-      GridPoint(centerX - 1, centerY + 1),
-      GridPoint(centerX + 1, centerY + 1),
-    ];
+    // Corner offsets on the side the nub points toward (front) and the flat
+    // side (back), per rotation state: 0 points up, R right, 2 down, L left.
+    final front = switch (normalizeRotation(piece.rotation)) {
+      0 => const [GridPoint(-1, -1), GridPoint(1, -1)],
+      1 => const [GridPoint(1, -1), GridPoint(1, 1)],
+      2 => const [GridPoint(-1, 1), GridPoint(1, 1)],
+      _ => const [GridPoint(-1, -1), GridPoint(-1, 1)],
+    };
+    final back = switch (normalizeRotation(piece.rotation)) {
+      0 => const [GridPoint(-1, 1), GridPoint(1, 1)],
+      1 => const [GridPoint(-1, -1), GridPoint(-1, 1)],
+      2 => const [GridPoint(-1, -1), GridPoint(1, -1)],
+      _ => const [GridPoint(1, -1), GridPoint(1, 1)],
+    };
 
-    return corners.where((corner) => _isOccupiedForTSpin(corner)).length >= 3;
+    int occupied(List<GridPoint> offsets) => offsets
+        .where(
+          (offset) => _isOccupiedForTSpin(
+            GridPoint(centerX + offset.x, centerY + offset.y),
+          ),
+        )
+        .length;
+
+    final frontOccupied = occupied(front);
+    final backOccupied = occupied(back);
+    if (frontOccupied + backOccupied < 3) {
+      return _TSpinKind.none;
+    }
+    if (frontOccupied == 2 ||
+        _lastRotationKickIndex == _tSpinUpgradeKickIndex) {
+      return _TSpinKind.full;
+    }
+    return _TSpinKind.mini;
   }
 
   bool _isOccupiedForTSpin(GridPoint point) {
@@ -834,19 +967,27 @@ final class TetrisGame {
   }
 
   void _spawnPiece(Tetromino type) {
-    final piece = ActivePiece(
+    var piece = ActivePiece(
       type: type,
       rotation: 0,
       x: _spawnX(type),
       y: _spawnY(type),
     );
 
-    active = piece;
     if (!_canPlace(piece)) {
       gameOver = true;
       active = null;
       _emit(const ToppedOutEvent());
+      return;
     }
+
+    // Guideline: pieces move down one row immediately after appearing.
+    final dropped = piece.copyWith(y: piece.y + 1);
+    if (_canPlace(dropped)) {
+      piece = dropped;
+    }
+    active = piece;
+    _lowestReachedY = piece.y;
   }
 
   int _spawnX(Tetromino type) {

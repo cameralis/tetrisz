@@ -6,18 +6,33 @@ import 'package:tetris/src/game/tetromino.dart';
 
 void main() {
   group('TetrisGame', () {
-    test('spawns pieces inside the hidden buffer', () {
+    test('spawns on rows 21-22 and immediately steps down one row', () {
       final game = TetrisGame(scriptedPieces: [Tetromino.t]);
 
       expect(game.active?.type, Tetromino.t);
+      // Spawn row is bufferRows - 2; the guideline spawn drop moves the piece
+      // one row down right away when nothing blocks it.
+      expect(game.active?.y, TetrisGame.bufferRows - 1);
       expect(
-        game.activeCells.every((cell) => cell.y < TetrisGame.bufferRows),
+        game.activeCells.every((cell) => cell.y <= TetrisGame.bufferRows),
         isTrue,
       );
       expect(
         game.activeCells.map((cell) => cell.x),
         everyElement(inInclusiveRange(3, 5)),
       );
+    });
+
+    test('skips the spawn drop when the row below is blocked', () {
+      final game = TetrisGame(
+        scriptedPieces: [Tetromino.t, Tetromino.t, Tetromino.t],
+      );
+      // Block one cell of the would-be dropped position of the next spawn.
+      game.setCell(4, TetrisGame.bufferRows, Tetromino.garbage);
+
+      game.hold();
+
+      expect(game.active?.y, TetrisGame.bufferRows - 2);
     });
 
     test('uses a seven-bag generator', () {
@@ -336,12 +351,14 @@ void main() {
       LineClearResult clear(
         int lines, {
         bool tSpin = false,
+        bool mini = false,
         bool b2b = false,
         bool pc = false,
       }) {
         return LineClearResult(
           lines: lines,
           tSpin: tSpin,
+          tSpinMini: mini,
           perfectClear: pc,
           backToBack: b2b,
           points: 0,
@@ -355,6 +372,15 @@ void main() {
       expect(TetrisGame.attackForClear(clear(1, tSpin: true), 0), 2);
       expect(TetrisGame.attackForClear(clear(2, tSpin: true), 0), 4);
       expect(TetrisGame.attackForClear(clear(3, tSpin: true), 0), 6);
+      // Minis attack like plain clears of the same size.
+      expect(
+        TetrisGame.attackForClear(clear(1, tSpin: true, mini: true), 0),
+        0,
+      );
+      expect(
+        TetrisGame.attackForClear(clear(2, tSpin: true, mini: true), 0),
+        1,
+      );
       expect(TetrisGame.attackForClear(clear(4, b2b: true), 0), 5);
       expect(TetrisGame.attackForClear(clear(4, pc: true), 0), 14);
       // Combo bonus ramps with sustained clears.
@@ -411,6 +437,114 @@ void main() {
       final restored = TetrisGame(seed: 9)..restore(json);
 
       expect(restored.pendingGarbageLines, 0);
+    });
+  });
+
+  group('guideline compliance', () {
+    test('hard drop after an airborne rotation is not a T-spin', () {
+      final game = TetrisGame(scriptedPieces: [Tetromino.t, Tetromino.o]);
+      // L-shaped wall left of an open column: the T free-falls into a spot
+      // with three occupied corners, which must not count as a T-spin.
+      game.setVisibleCell(3, 17, Tetromino.z);
+      game.setVisibleCell(3, 19, Tetromino.z);
+      game.setVisibleCell(5, 19, Tetromino.z);
+
+      expect(game.rotateClockwise(), isTrue);
+      final distance = game.hardDrop();
+
+      expect(distance, greaterThan(10));
+      expect(game.lastClear.tSpin, isFalse);
+      expect(game.score, distance * 2);
+    });
+
+    test('hard drop from a grounded rotation keeps the T-spin', () {
+      final game = TetrisGame(scriptedPieces: [Tetromino.t, Tetromino.o]);
+      // TSD chamber. Row 18: cols 3-5 open. Row 19: col 4 open.
+      for (var x = 0; x < TetrisGame.width; x += 1) {
+        if (x != 4) game.setVisibleCell(x, 19, Tetromino.z);
+        if (x < 3 || x > 5) game.setVisibleCell(x, 18, Tetromino.z);
+      }
+      game.setVisibleCell(3, 17, Tetromino.z); // roof forcing the down-kick
+      game.setVisibleCell(6, 17, Tetromino.z); // blocks in-place rotation
+
+      expect(game.rotateCounterClockwise(), isTrue); // 0 -> L
+      expect(game.moveRight(), isTrue); // hang over the slot
+      while (game.softDropStep()) {}
+      // Last action: L -> 2 rotation; the SRS (-1,+1) kick drops it in. The
+      // hard drop travels zero rows, so the T-spin must survive.
+      expect(game.rotateCounterClockwise(), isTrue);
+      final distance = game.hardDrop();
+
+      expect(distance, 0);
+      expect(game.lastClear.lines, 2);
+      expect(game.lastClear.tSpin, isTrue);
+      expect(game.lastClear.tSpinMini, isFalse);
+      expect(game.lastClear.points, 1200);
+    });
+
+    test('wall-kick T-spin single is a mini: 200 points, no attack', () {
+      final game = TetrisGame(scriptedPieces: [Tetromino.t, Tetromino.o]);
+      // Bottom row full except the column hugging the left wall.
+      for (var x = 1; x < TetrisGame.width; x += 1) {
+        game.setVisibleCell(x, 19, Tetromino.z);
+      }
+
+      while (game.moveLeft()) {}
+      while (game.softDropStep()) {}
+      // 0 -> R against the wall: the (-1, 0) kick tucks the T into the
+      // corner. Front corners: one filled; back corners: the wall.
+      expect(game.rotateClockwise(), isTrue);
+      game.hardDrop();
+
+      expect(game.lastClear.lines, 1);
+      expect(game.lastClear.tSpin, isTrue);
+      expect(game.lastClear.tSpinMini, isTrue);
+      expect(game.lastClear.points, 200);
+      expect(TetrisGame.attackForClear(game.lastClear, 0), 0);
+    });
+
+    test('rotation stalling cannot postpone lock down forever', () {
+      final game = TetrisGame(
+        scriptedPieces: [Tetromino.i, Tetromino.i, Tetromino.o],
+      );
+      game.hardDrop();
+      while (game.softDropStep()) {}
+
+      // Alternate floor-kick rotations with sub-lock-delay ticks. Falling
+      // back onto already-visited rows must not refill the 15 move resets,
+      // so the piece locks once the budget runs out.
+      var cycles = 0;
+      while (game.lockCount < 2 && cycles < 40) {
+        game.tick(const Duration(milliseconds: 400));
+        if (game.lockCount >= 2) break;
+        game.rotateClockwise();
+        game.tick(const Duration(milliseconds: 400));
+        if (game.lockCount >= 2) break;
+        game.rotateCounterClockwise();
+        cycles += 1;
+      }
+
+      expect(game.lockCount, greaterThanOrEqualTo(2));
+      expect(cycles, lessThan(30));
+    });
+
+    test('soft drop falls at 20x gravity and scores one point per row', () {
+      final game = TetrisGame(scriptedPieces: [Tetromino.t, Tetromino.i]);
+      final startY = game.active!.y;
+
+      game.setSoftDropping(true);
+      // Level 1 gravity is 800ms per row; soft drop is 40ms per row.
+      game.tick(const Duration(milliseconds: 120));
+
+      expect(game.active!.y, startY + 3);
+      expect(game.score, 3);
+
+      game.setSoftDropping(false);
+      game.tick(const Duration(milliseconds: 120));
+
+      // Back on normal gravity: 120ms is far below 800ms, so no movement.
+      expect(game.active!.y, startY + 3);
+      expect(game.score, 3);
     });
   });
 }

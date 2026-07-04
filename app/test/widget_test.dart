@@ -197,8 +197,10 @@ void _expectFreshZeroGame(TetrisGame game) {
   expect(game.paused, isFalse);
   expect(_visibleLockedCellCount(game), 0);
   expect(game.activeCells, isNotEmpty);
+  // A fresh piece spawns on rows 21-22 and immediately steps down one row,
+  // so it may peek into the top visible row but no deeper.
   expect(
-    game.activeCells.where((cell) => cell.y >= TetrisGame.bufferRows),
+    game.activeCells.where((cell) => cell.y > TetrisGame.bufferRows),
     isEmpty,
   );
 }
