@@ -43,6 +43,10 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  flutter_driver:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
   audioplayers_platform_interface: ^7.1.1
 
   # The "flutter_lints" package below contains a set of recommended lints to
