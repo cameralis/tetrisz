@@ -43,6 +43,19 @@ Gotchas learned the hard way:
   is in active use; a foreground browser stole a click once. Use the
   integration drive instead.
 
+## Performance soak (frame timings + RSS over time)
+
+`integration_test/perf_soak_test.dart` plays the real app with scripted
+inputs and reports build/raster percentiles, jank counts, RSS and max
+`transientCallbackCount` in 30-second buckets (run command in its header;
+`SOAK_SECONDS` sets length, `SOAK_IDLE=true` disables inputs as a control).
+Degradation-over-time bugs show up as later buckets slower than bucket 0.
+Healthy reference on this machine (profile mode): build p50 ~1ms, raster
+p50 ~1-2ms, transient callbacks single digits, flat RSS after warm-up.
+Before the 2026-07 audioplayers fixes, RSS grew ~115MB/min and transient
+callbacks grew by ~1 per input (leaked 120Hz position-poller chains) —
+treat sustained growth in either as a regression.
+
 ## Quick manual launch
 
 ```bash
