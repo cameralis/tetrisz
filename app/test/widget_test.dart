@@ -259,32 +259,41 @@ final class _RecordingMusicPlayer implements TetrisMusicPlayer {
   var resumeCount = 0;
   var stopCount = 0;
   var disposed = false;
+  var playing = false;
 
   @override
   Stream<void> get onTrackComplete => _completeController.stream;
 
+  @override
+  bool get isPlaying => playing;
+
   void completeTrack() {
+    playing = false;
     _completeController.add(null);
   }
 
   @override
   Future<void> playAsset(String assetPath) async {
     playedAssets.add(assetPath);
+    playing = true;
   }
 
   @override
   Future<void> resume() async {
     resumeCount += 1;
+    playing = true;
   }
 
   @override
   Future<void> pause() async {
     pauseCount += 1;
+    playing = false;
   }
 
   @override
   Future<void> stop() async {
     stopCount += 1;
+    playing = false;
   }
 
   @override
@@ -787,6 +796,41 @@ void main() {
       preferences.getInt(tetrisScoringEraPreferenceKey),
       tetrisCurrentScoringEra,
     );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('high score writes are deferred to round boundaries', (
+    tester,
+  ) async {
+    _usePhoneViewport(tester);
+    SharedPreferences.setMockInitialValues({
+      tetrisScoringEraPreferenceKey: tetrisCurrentScoringEra,
+    });
+    final game = _visiblePieceGame(Tetromino.t);
+
+    await tester.pumpWidget(TetrisApp(enableAudio: false, game: game));
+    await _flushPreferenceTasks(tester);
+
+    await tester.drag(
+      find.byKey(const ValueKey('tetris-board')),
+      const Offset(0, 96),
+    );
+    await tester.pump();
+    expect(game.score, greaterThan(0));
+
+    await _flushPreferenceTasks(tester);
+    final preferences = await SharedPreferences.getInstance();
+    expect(
+      preferences.getInt(tetrisHighScorePreferenceKey),
+      isNull,
+      reason: 'scoring events must not write the high score preference on '
+          'every point gained; writes happen at round boundaries only',
+    );
+
+    await tester.tap(find.byTooltip('Pause'));
+    await tester.pump();
+    await _flushPreferenceTasks(tester);
+    expect(preferences.getInt(tetrisHighScorePreferenceKey), game.score);
     expect(tester.takeException(), isNull);
   });
 

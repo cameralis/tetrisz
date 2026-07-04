@@ -106,6 +106,10 @@ enum TetrisHaptic { move, softDrop, rotate, hardDrop }
 abstract interface class TetrisMusicPlayer {
   Stream<void> get onTrackComplete;
 
+  /// Whether a track is actively playing right now. Callers use this to skip
+  /// redundant resume/volume calls on the per-input music keepalive path.
+  bool get isPlaying;
+
   Future<void> playAsset(String assetPath);
 
   Future<void> resume();
@@ -123,6 +127,12 @@ final class AssetTetrisMusicPlayer implements TetrisMusicPlayer {
   AssetTetrisMusicPlayer({AudioPlayer? player})
     : _player = player ?? AudioPlayer() {
     _player.audioCache = AudioCache(prefix: '');
+    // Nobody consumes onPositionChanged, and audioplayers' frame-based
+    // position updater stacks an extra per-frame getCurrentPosition poll on
+    // EVERY resume() without cancelling the previous one — with resume fired
+    // per input, a long round accumulates thousands of per-frame platform
+    // calls and the game grinds to 20-30fps.
+    _player.positionUpdater = null;
   }
 
   final AudioPlayer _player;
@@ -131,13 +141,23 @@ final class AssetTetrisMusicPlayer implements TetrisMusicPlayer {
   Stream<void> get onTrackComplete => _player.onPlayerComplete;
 
   @override
+  bool get isPlaying => _player.state == PlayerState.playing;
+
+  @override
   Future<void> playAsset(String assetPath) async {
     await _player.setReleaseMode(ReleaseMode.stop);
     await _player.play(AssetSource(assetPath));
   }
 
   @override
-  Future<void> resume() => _player.resume();
+  Future<void> resume() async {
+    if (isPlaying) {
+      // Resuming a playing player is a no-op semantically, but audioplayers
+      // restarts its position updater on every call; don't feed it.
+      return;
+    }
+    await _player.resume();
+  }
 
   @override
   Future<void> pause() => _player.pause();
@@ -171,11 +191,20 @@ final class NoopTetrisSoundEffects implements TetrisSoundEffects {
 final class AssetTetrisSoundEffects implements TetrisSoundEffects {
   AssetTetrisSoundEffects({AudioCache? audioCache})
     : _audioCache = audioCache ?? AudioCache(prefix: '') {
-    _warmUpPools();
+    _warmUpPlayers();
   }
 
+  /// Fixed number of platform players per effect; the N+1th overlapping copy
+  /// restarts the oldest player instead of allocating a new one. audioplayers
+  /// never removes released players from its native registry (only dispose()
+  /// does), so allocating per overlap — like AudioPool.start does — leaks a
+  /// native player + event channel on every overflow and the whole session
+  /// slows down as they accumulate.
+  static const _playersPerEffect = 4;
+
   final AudioCache _audioCache;
-  final Map<TetrisSfx, Future<AudioPool>> _pools = {};
+  final Map<TetrisSfx, Future<List<AudioPlayer>>> _players = {};
+  final Map<TetrisSfx, int> _nextPlayerIndex = {};
   final Stopwatch _clock = Stopwatch()..start();
   final Map<TetrisSfx, int> _lastStartMilliseconds = {};
   final Set<TetrisSfx> _startsInProgress = {};
@@ -209,8 +238,15 @@ final class AssetTetrisSoundEffects implements TetrisSoundEffects {
 
   Future<void> _play(TetrisSfx sfx, double playbackVolume) async {
     try {
-      final pool = await _poolFor(sfx);
-      await pool.start(volume: playbackVolume);
+      final players = await _playersFor(sfx);
+      final index = _nextPlayerIndex[sfx] ?? 0;
+      _nextPlayerIndex[sfx] = (index + 1) % players.length;
+      final player = players[index];
+      // Rewinds the player if its previous copy of the sound is still going;
+      // with four newer layers on top the cut tail is inaudible.
+      await player.stop();
+      await player.setVolume(playbackVolume);
+      await player.resume();
     } catch (_) {
     } finally {
       _startsInProgress.remove(sfx);
@@ -229,20 +265,32 @@ final class AssetTetrisSoundEffects implements TetrisSoundEffects {
     };
   }
 
-  Future<AudioPool> _poolFor(TetrisSfx sfx) {
-    return _pools.putIfAbsent(
-      sfx,
-      () => AudioPool.createFromAsset(
-        path: sfx.assetPath,
-        audioCache: _audioCache,
-        maxPlayers: 4,
-      ),
-    );
+  Future<List<AudioPlayer>> _playersFor(TetrisSfx sfx) {
+    return _players.putIfAbsent(sfx, () async {
+      final players = <AudioPlayer>[];
+      try {
+        for (var i = 0; i < _playersPerEffect; i += 1) {
+          final player = AudioPlayer()..audioCache = _audioCache;
+          // Position streams are unused; the default frame-based updater
+          // would poll getCurrentPosition every frame while a sound plays.
+          player.positionUpdater = null;
+          players.add(player);
+          await player.setReleaseMode(ReleaseMode.stop);
+          await player.setSource(AssetSource(sfx.assetPath));
+        }
+        return players;
+      } catch (_) {
+        for (final player in players) {
+          unawaited(player.dispose());
+        }
+        rethrow;
+      }
+    });
   }
 
-  void _warmUpPools() {
+  void _warmUpPlayers() {
     for (final sfx in TetrisSfx.values) {
-      unawaited(_poolFor(sfx).then<void>((_) {}, onError: (_, _) {}));
+      unawaited(_playersFor(sfx).then<void>((_) {}, onError: (_, _) {}));
     }
   }
 
@@ -252,10 +300,12 @@ final class AssetTetrisSoundEffects implements TetrisSoundEffects {
   }
 
   Future<void> _dispose() async {
-    try {
-      final pools = await Future.wait(_pools.values);
-      await Future.wait(pools.map((pool) => pool.dispose()));
-    } catch (_) {}
+    for (final playersFuture in _players.values) {
+      try {
+        final players = await playersFuture;
+        await Future.wait(players.map((player) => player.dispose()));
+      } catch (_) {}
+    }
   }
 }
 
@@ -429,6 +479,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   int _dragWallImpactMask = 0;
   int _lineClearAnimationSerial = 0;
   int _highScore = 0;
+  bool _highScoreDirty = false;
   double _musicVolume = _defaultMusicVolume;
   double _sfxVolume = _defaultSfxVolume;
   LineClearAnimationSnapshot? _lineClearSnapshot;
@@ -511,6 +562,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
 
   @override
   void dispose() {
+    _flushHighScore();
     WidgetsBinding.instance.removeObserver(this);
     final session = widget.versusSession;
     if (session != null) {
@@ -654,6 +706,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     // Leaving the foreground: freeze the round so nothing falls while the
     // player is away and persist a resumable snapshot to disk.
     _autoPauseForBackground();
+    _flushHighScore();
     unawaited(_persistGameState());
     unawaited(_musicPlayer?.pause() ?? Future.value());
   }
@@ -698,6 +751,9 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     // animating, so attacks and game-over reach the opponent immediately.
     widget.versusSession?.onLocalTick();
     _maybeSubmitLeaderboardScore();
+    if (_game.gameOver) {
+      _flushHighScore();
+    }
     if (delta <= Duration.zero ||
         delta > _maxTickDelta ||
         _game.paused ||
@@ -821,6 +877,13 @@ class _TetrisGamePageState extends State<TetrisGamePage>
 
     final player = _musicPlayer;
     if (player == null) {
+      return;
+    }
+
+    // This runs on every input as an autoplay-unblock keepalive; while the
+    // track is audibly playing there is nothing to do, and each redundant
+    // setVolume/resume is a platform-channel call on the main thread.
+    if (_musicStarted && player.isPlaying) {
       return;
     }
 
@@ -1024,6 +1087,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   }
 
   void _restart() {
+    _flushHighScore();
     _lineClearController.stop();
     _boardImpactController.stop();
     _lineClearAnimationSerial += 1;
@@ -1046,6 +1110,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     }
     setState(_game.togglePause);
     if (_game.paused) {
+      _flushHighScore();
       unawaited(_musicPlayer?.pause() ?? Future.value());
     } else {
       unawaited(_playMusic());
@@ -1138,7 +1203,18 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       return;
     }
 
+    // Only the in-memory value tracks every point; the preference write is
+    // deferred to round boundaries. Persisting here would issue a platform
+    // channel write per scoring event (soft drops alone score at ~20Hz).
     _highScore = _game.score;
+    _highScoreDirty = true;
+  }
+
+  void _flushHighScore() {
+    if (!_highScoreDirty) {
+      return;
+    }
+    _highScoreDirty = false;
     unawaited(_saveHighScorePreference(_highScore));
   }
 
@@ -1679,6 +1755,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   /// the home menu. Bypasses [PopScope] deliberately: this is the one
   /// sanctioned exit.
   void _exitToMenu() {
+    _flushHighScore();
     unawaited(_persistGameState());
     final navigator = Navigator.of(context);
     if (navigator.canPop()) {

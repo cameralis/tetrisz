@@ -78,6 +78,120 @@ void main() {
 
     expect(starts, hasLength(2));
   });
+
+  testWidgets('overlapping playback never grows the player set and every '
+      'player is disposed', (tester) async {
+    // Real sfx files run ~0.8-1.3s while starts can be ~35-55ms apart, so
+    // many copies of the same sound overlap. Simulate that worst case by
+    // never completing playback while the effects are fired. The whole
+    // scenario runs inside one runAsync block so the players' internal
+    // futures are real-async instead of stuck in the fake-async test zone.
+    platform = _FakeAudioplayersPlatform(autoComplete: false);
+    AudioplayersPlatformInterface.instance = platform;
+
+    await tester.runAsync(() async {
+      final soundEffects = AssetTetrisSoundEffects(
+        audioCache: _FakeAudioCache(),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      for (var i = 0; i < 12; i += 1) {
+        soundEffects.play(TetrisSfx.hardDrop, volume: 2);
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+
+      // Let all in-flight sounds finish, then tear down.
+      platform.completeAll();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      soundEffects.dispose();
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    });
+
+    final starts = platform.calls.where((call) => call.method == 'resume');
+    expect(
+      starts.length,
+      greaterThanOrEqualTo(5),
+      reason: 'sanity: the overlapping plays must actually have started',
+    );
+
+    final hardDropPlayers = platform.calls
+        .where(
+          (call) =>
+              call.method == 'setSourceUrl' &&
+              (call.value as String).contains('hard_drop'),
+        )
+        .map((call) => call.id)
+        .toSet();
+    expect(
+      hardDropPlayers.length,
+      lessThanOrEqualTo(4),
+      reason: 'overlapping playback must reuse a fixed player set, not '
+          'allocate a new platform player per overlapping copy',
+    );
+
+    final created = platform.calls
+        .where((call) => call.method == 'create')
+        .map((call) => call.id)
+        .toSet();
+    final disposed = platform.calls
+        .where((call) => call.method == 'dispose')
+        .map((call) => call.id)
+        .toSet();
+    expect(
+      created.difference(disposed),
+      isEmpty,
+      reason: 'every platform player ever created must be disposed',
+    );
+    expect(
+      platform.calls.where((call) => call.method == 'getCurrentPosition'),
+      isEmpty,
+      reason: 'sound effects must not poll playback position',
+    );
+  });
+
+  testWidgets('music player drops redundant resumes and never polls position', (
+    tester,
+  ) async {
+    platform = _FakeAudioplayersPlatform(autoComplete: false);
+    AudioplayersPlatformInterface.instance = platform;
+
+    // audioplayers restarts its frame-based position poller on EVERY
+    // resume() without cancelling the previous one; the game fires a music
+    // resume per input as an autoplay-unblock keepalive, so a long round
+    // would stack thousands of per-frame getCurrentPosition platform calls.
+    // The wrapper must therefore (a) treat resume-while-playing as a no-op
+    // and (b) run with position polling disabled entirely.
+    late final AssetTetrisMusicPlayer player;
+    await tester.runAsync(() async {
+      player = AssetTetrisMusicPlayer(player: AudioPlayer());
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      for (var i = 0; i < 5; i += 1) {
+        await player.resume();
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
+
+    expect(
+      platform.calls.where((call) => call.method == 'resume'),
+      hasLength(1),
+      reason: 'resume while already playing must be a no-op',
+    );
+
+    // Give a frame-based poller every chance to run before asserting.
+    for (var i = 0; i < 20; i += 1) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    });
+    expect(
+      platform.calls.where((call) => call.method == 'getCurrentPosition'),
+      isEmpty,
+      reason: 'the music player must not poll playback position every frame',
+    );
+
+    await tester.runAsync(player.dispose);
+  });
 }
 
 final class _FakeAudioCache extends AudioCache {
@@ -96,8 +210,20 @@ final class _FakeCall {
 }
 
 final class _FakeAudioplayersPlatform extends AudioplayersPlatformInterface {
+  _FakeAudioplayersPlatform({this.autoComplete = true});
+
+  /// When true every resume immediately fires a completion event; when false
+  /// sounds stay "playing" until [completeAll], so playback overlaps.
+  final bool autoComplete;
+
   final calls = <_FakeCall>[];
   final _eventStreams = <String, StreamController<AudioEvent>>{};
+
+  void completeAll() {
+    for (final controller in _eventStreams.values) {
+      controller.add(const AudioEvent(eventType: AudioEventType.complete));
+    }
+  }
 
   @override
   Future<void> create(String playerId) async {
@@ -146,6 +272,9 @@ final class _FakeAudioplayersPlatform extends AudioplayersPlatformInterface {
   @override
   Future<void> resume(String playerId) async {
     calls.add(_FakeCall(id: playerId, method: 'resume'));
+    if (!autoComplete) {
+      return;
+    }
     unawaited(
       Future<void>.microtask(() {
         _eventStreams[playerId]?.add(
