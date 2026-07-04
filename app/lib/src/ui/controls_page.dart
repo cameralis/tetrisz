@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:gamepads/gamepads.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -29,6 +30,7 @@ class ControlsPage extends StatefulWidget {
 class _ControlsPageState extends State<ControlsPage> {
   GamepadBindings _gamepadBindings = GamepadBindings.guideline();
   TouchBindings _touchBindings = TouchBindings.defaults();
+  KeyboardBindings _keyboardBindings = KeyboardBindings.guideline();
   List<GamepadController> _connected = const [];
   StreamSubscription<GamepadControlEvent>? _activitySubscription;
 
@@ -61,12 +63,16 @@ class _ControlsPageState extends State<ControlsPage> {
       final touchBindings = TouchBindings.decode(
         preferences.getString(tetrisTouchBindingsPreferenceKey),
       );
+      final keyboardBindings = KeyboardBindings.decode(
+        preferences.getString(tetrisKeyboardBindingsPreferenceKey),
+      );
       if (!mounted) {
         return;
       }
       setState(() {
         _gamepadBindings = gamepadBindings;
         _touchBindings = touchBindings;
+        _keyboardBindings = keyboardBindings;
       });
     } catch (_) {}
   }
@@ -151,6 +157,44 @@ class _ControlsPageState extends State<ControlsPage> {
     unawaited(_saveTouchBindings());
   }
 
+  Future<void> _saveKeyboardBindings() async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setString(
+        tetrisKeyboardBindingsPreferenceKey,
+        _keyboardBindings.encode(),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _captureKeyboardBinding(GameAction action) async {
+    final keyId = await showDialog<int>(
+      context: context,
+      builder: (_) => _KeyboardCaptureDialog(action: action),
+    );
+    if (keyId == null || !mounted) {
+      return;
+    }
+    setState(() {
+      _keyboardBindings = _keyboardBindings.bind(keyId, action);
+    });
+    unawaited(_saveKeyboardBindings());
+  }
+
+  void _unbindKey(int keyId) {
+    setState(() {
+      _keyboardBindings = _keyboardBindings.unbind(keyId);
+    });
+    unawaited(_saveKeyboardBindings());
+  }
+
+  void _resetKeyboardBindings() {
+    setState(() {
+      _keyboardBindings = KeyboardBindings.guideline();
+    });
+    unawaited(_saveKeyboardBindings());
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -179,6 +223,20 @@ class _ControlsPageState extends State<ControlsPage> {
               key: const ValueKey('controls-reset-gamepad'),
               label: 'Reset to Guideline defaults',
               onPressed: _resetGamepadBindings,
+            ),
+            const SizedBox(height: 20),
+            const _SectionHeader('KEYBOARD'),
+            for (final action in GameAction.values)
+              _KeyboardActionTile(
+                action: action,
+                keyIds: _keyboardBindings.keysFor(action),
+                onCapture: () => unawaited(_captureKeyboardBinding(action)),
+                onUnbind: _unbindKey,
+              ),
+            _ResetButton(
+              key: const ValueKey('controls-reset-keyboard'),
+              label: 'Reset to Guideline defaults',
+              onPressed: _resetKeyboardBindings,
             ),
             const SizedBox(height: 20),
             const _SectionHeader('TOUCH'),
@@ -470,6 +528,123 @@ class _SectionHeader extends StatelessWidget {
           letterSpacing: 1.4,
           fontWeight: FontWeight.w600,
         ),
+      ),
+    );
+  }
+}
+
+/// Waits for the next key press and pops with its logical key ID. Modifier
+/// keys count — a Shift press is a valid Hold binding — but system-reserved
+/// keys like the debug F10 are still delivered by Flutter so we accept
+/// anything the framework surfaces.
+class _KeyboardCaptureDialog extends StatefulWidget {
+  const _KeyboardCaptureDialog({required this.action});
+
+  final GameAction action;
+
+  @override
+  State<_KeyboardCaptureDialog> createState() => _KeyboardCaptureDialogState();
+}
+
+class _KeyboardCaptureDialogState extends State<_KeyboardCaptureDialog> {
+  final FocusNode _focusNode = FocusNode(debugLabel: 'KeyboardCaptureDialog');
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  KeyEventResult _handle(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) {
+      return KeyEventResult.handled;
+    }
+    Navigator.of(context).pop(event.logicalKey.keyId);
+    return KeyEventResult.handled;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      focusNode: _focusNode,
+      autofocus: true,
+      onKeyEvent: _handle,
+      child: AlertDialog(
+        backgroundColor: _panelColor,
+        title: Text(
+          'Bind ${widget.action.label}',
+          style: const TextStyle(color: _textColor, fontSize: 16),
+        ),
+        content: const Text(
+          'Press a key on your keyboard…',
+          style: TextStyle(color: _mutedTextColor, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _KeyboardActionTile extends StatelessWidget {
+  const _KeyboardActionTile({
+    required this.action,
+    required this.keyIds,
+    required this.onCapture,
+    required this.onUnbind,
+  });
+
+  final GameAction action;
+  final List<int> keyIds;
+  final VoidCallback onCapture;
+  final ValueChanged<int> onUnbind;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: _panelColor,
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        key: ValueKey('keyboard-action-${action.name}'),
+        onTap: onCapture,
+        title: Text(
+          action.label,
+          style: const TextStyle(color: _textColor, fontSize: 14),
+        ),
+        subtitle: keyIds.isEmpty
+            ? const Text(
+                'Not bound',
+                style: TextStyle(color: _mutedTextColor, fontSize: 12),
+              )
+            : Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (final keyId in keyIds)
+                      InputChip(
+                        key: ValueKey(
+                          'keyboard-binding-${action.name}-$keyId',
+                        ),
+                        label: Text(keyboardKeyLabel(keyId)),
+                        labelStyle: const TextStyle(
+                          color: _textColor,
+                          fontSize: 11,
+                        ),
+                        backgroundColor: const Color(0xFF272A31),
+                        side: const BorderSide(color: Color(0x22FFFFFF)),
+                        deleteIconColor: _mutedTextColor,
+                        onDeleted: () => onUnbind(keyId),
+                      ),
+                  ],
+                ),
+              ),
+        trailing: const Icon(Icons.add_circle_outline, color: _accentColor),
       ),
     );
   }

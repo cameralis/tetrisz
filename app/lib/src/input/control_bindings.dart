@@ -1,9 +1,11 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 const tetrisGamepadBindingsPreferenceKey = 'tetris.gamepadBindings';
 const tetrisTouchBindingsPreferenceKey = 'tetris.touchBindings';
+const tetrisKeyboardBindingsPreferenceKey = 'tetris.keyboardBindings';
 
 /// A rebindable gameplay command. Gamepad controls and touch gestures both
 /// resolve to one of these before reaching the engine.
@@ -212,4 +214,106 @@ class TouchBindings {
     for (final gesture in TouchGesture.values)
       gesture.name: actionFor(gesture)?.name ?? 'none',
   });
+}
+
+/// The keyboard key → action map. Immutable; rebinding produces a new
+/// instance. Keys are identified by their [LogicalKeyboardKey.keyId], so the
+/// bindings survive platform / layout differences (Left Arrow is Left Arrow
+/// on macOS, Windows, Linux, and web alike).
+@immutable
+class KeyboardBindings {
+  const KeyboardBindings(this._map);
+
+  /// Tetris Guideline defaults: arrow keys move and soft drop, Space hard
+  /// drops, Z / X rotate (mirrored by Ctrl and the up arrow for
+  /// left-handed / one-handed play), C and Shift hold, Escape and P pause.
+  static final Map<int, GameAction> guidelineDefaults = {
+    LogicalKeyboardKey.arrowLeft.keyId: GameAction.moveLeft,
+    LogicalKeyboardKey.arrowRight.keyId: GameAction.moveRight,
+    LogicalKeyboardKey.arrowDown.keyId: GameAction.softDrop,
+    LogicalKeyboardKey.arrowUp.keyId: GameAction.rotateClockwise,
+    LogicalKeyboardKey.space.keyId: GameAction.hardDrop,
+    LogicalKeyboardKey.keyZ.keyId: GameAction.rotateCounterClockwise,
+    LogicalKeyboardKey.controlLeft.keyId: GameAction.rotateCounterClockwise,
+    LogicalKeyboardKey.controlRight.keyId: GameAction.rotateCounterClockwise,
+    LogicalKeyboardKey.keyX.keyId: GameAction.rotateClockwise,
+    LogicalKeyboardKey.keyC.keyId: GameAction.hold,
+    LogicalKeyboardKey.shiftLeft.keyId: GameAction.hold,
+    LogicalKeyboardKey.shiftRight.keyId: GameAction.hold,
+    LogicalKeyboardKey.escape.keyId: GameAction.pause,
+    LogicalKeyboardKey.keyP.keyId: GameAction.pause,
+  };
+
+  factory KeyboardBindings.guideline() =>
+      KeyboardBindings(Map.of(guidelineDefaults));
+
+  /// Parses persisted bindings; `null` or malformed input falls back to the
+  /// guideline defaults, unparseable key IDs or unknown actions are skipped.
+  factory KeyboardBindings.decode(String? json) {
+    if (json == null) {
+      return KeyboardBindings.guideline();
+    }
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(json);
+    } on FormatException {
+      return KeyboardBindings.guideline();
+    }
+    if (decoded is! Map<String, dynamic>) {
+      return KeyboardBindings.guideline();
+    }
+    final map = <int, GameAction>{};
+    for (final entry in decoded.entries) {
+      final keyId = int.tryParse(entry.key);
+      final action = GameAction.tryParse(entry.value as String?);
+      if (keyId != null && action != null) {
+        map[keyId] = action;
+      }
+    }
+    return KeyboardBindings(map);
+  }
+
+  final Map<int, GameAction> _map;
+
+  GameAction? actionFor(int keyId) => _map[keyId];
+
+  List<int> keysFor(GameAction action) => [
+    for (final entry in _map.entries)
+      if (entry.value == action) entry.key,
+  ];
+
+  KeyboardBindings bind(int keyId, GameAction action) =>
+      KeyboardBindings({..._map, keyId: action});
+
+  KeyboardBindings unbind(int keyId) =>
+      KeyboardBindings({..._map}..remove(keyId));
+
+  String encode() => jsonEncode({
+    for (final entry in _map.entries) entry.key.toString(): entry.value.name,
+  });
+}
+
+/// Human-readable label for a keyboard key ID, used in the rebind UI. Falls
+/// back to a hex-formatted ID for exotic keys that the framework does not
+/// know a nicer name for.
+String keyboardKeyLabel(int keyId) {
+  final key = LogicalKeyboardKey.findKeyByKeyId(keyId);
+  if (key == null) {
+    return 'Key 0x${keyId.toRadixString(16).toUpperCase()}';
+  }
+  return _prettyKeyLabel(key);
+}
+
+String _prettyKeyLabel(LogicalKeyboardKey key) {
+  final label = key.keyLabel;
+  if (label.length == 1 && label.trim().isNotEmpty) {
+    return label.toUpperCase();
+  }
+  final debug = key.debugName ?? label;
+  return debug
+      .replaceAll('Arrow ', '')
+      .replaceAllMapped(
+        RegExp(r'([a-z])([A-Z])'),
+        (m) => '${m[1]} ${m[2]}',
+      );
 }
