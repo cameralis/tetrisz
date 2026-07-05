@@ -17,6 +17,7 @@ import '../input/gamepad_service.dart';
 import '../input/gamepad_ui_navigator.dart';
 import '../net/leaderboard_client.dart';
 import '../net/versus_session.dart';
+import '../platform_support.dart';
 import 'board_painting.dart';
 import 'home_page.dart';
 import 'leaderboard_page.dart';
@@ -472,6 +473,10 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   StreamSubscription<GamepadControlEvent>? _gamepadSubscription;
   GamepadBindings _gamepadBindings = GamepadBindings.guideline();
   TouchBindings _touchBindings = TouchBindings.defaults();
+  KeyboardBindings _keyboardBindings = KeyboardBindings.standard();
+  // Non-null only on desktop; owns the game page's keyboard focus so physical
+  // keys reach gameplay while menus keep their own focus traversal.
+  FocusNode? _keyboardFocusNode;
   final DasRepeater _dasRepeater = DasRepeater();
 
   Duration _lastFrameElapsed = Duration.zero;
@@ -565,6 +570,9 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _gamepadSubscription = widget.gamepad?.controlEvents.listen(
       _onGamepadControl,
     );
+    if (isDesktopPlatform) {
+      _keyboardFocusNode = FocusNode(debugLabel: 'tetris-gameplay-keyboard');
+    }
     _ticker = createTicker(_onFrame)..start();
     _snapBackController =
         AnimationController(vsync: this, duration: _snapBackDuration)
@@ -627,6 +635,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _lineClearController.dispose();
     _boardImpactController.dispose();
     _ticker.dispose();
+    _keyboardFocusNode?.dispose();
     unawaited(_gamepadSubscription?.cancel() ?? Future.value());
     unawaited(_musicCompleteSubscription?.cancel() ?? Future.value());
     if (_disposeSoundEffects) {
@@ -866,6 +875,9 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       final touchBindings = TouchBindings.decode(
         preferences.getString(tetrisTouchBindingsPreferenceKey),
       );
+      final keyboardBindings = KeyboardBindings.decode(
+        preferences.getString(tetrisKeyboardBindingsPreferenceKey),
+      );
       if (!mounted) {
         return;
       }
@@ -873,6 +885,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       setState(() {
         _gamepadBindings = gamepadBindings;
         _touchBindings = touchBindings;
+        _keyboardBindings = keyboardBindings;
         if (musicVolume != null) {
           _musicVolume = musicVolume.clamp(0.0, 1.0).toDouble();
         }
@@ -1151,6 +1164,9 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       _leaderboardSubmitted = false;
       _game.restart();
     });
+    // The game-over overlay held keyboard focus for its buttons; a fresh round
+    // hands it back to the board.
+    _ensureKeyboardFocus();
     unawaited(_clearSavedGame());
     unawaited(_restartMusicPlaylist());
   }
@@ -1164,6 +1180,9 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       _flushHighScore();
       unawaited(_musicPlayer?.pause() ?? Future.value());
     } else {
+      // Resuming dismisses the pause overlay, which held keyboard focus for
+      // its buttons; hand it back to the board.
+      _ensureKeyboardFocus();
       unawaited(_playMusic());
     }
   }
@@ -1470,13 +1489,50 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       return;
     }
     if (event.pressed) {
-      _onGamepadActionPressed(action);
+      _onActionPressed(action);
     } else {
-      _onGamepadActionReleased(action);
+      _onActionReleased(action);
     }
   }
 
-  void _onGamepadActionPressed(GameAction action) {
+  /// Desktop keyboard control, sharing the gamepad path: [_onActionPressed]
+  /// drives DAS and sustained soft drop identically. Installed only while the
+  /// [Focus] wrapper exists, i.e. on desktop.
+  ///
+  /// Pause/restart stays live over the pause and game-over overlays so Esc
+  /// resumes; every other action fires only while the board accepts input.
+  /// Any unbound key — and every gameplay key while a menu surface is up —
+  /// bubbles on untouched, so Flutter's built-in arrow/enter focus traversal
+  /// keeps navigating menus.
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    final action = _keyboardBindings.actionFor(event.logicalKey);
+    if (action == null) {
+      return KeyEventResult.ignored;
+    }
+    if (action != GameAction.pause && !_boardAcceptsInput) {
+      return KeyEventResult.ignored;
+    }
+    if (event is KeyDownEvent) {
+      _onActionPressed(action);
+    } else if (event is KeyUpEvent) {
+      _onActionReleased(action);
+    }
+    // KeyRepeatEvents are swallowed: DAS and the engine's sustained soft drop
+    // own auto-repeat, and consuming them keeps OS key-repeat from leaking to
+    // the menu shortcuts.
+    return KeyEventResult.handled;
+  }
+
+  /// Returns keyboard focus to the board after a menu surface (which grabbed
+  /// focus for its buttons) closes, so gameplay keys resume reaching the game.
+  void _ensureKeyboardFocus() {
+    final node = _keyboardFocusNode;
+    if (node != null && !node.hasFocus) {
+      node.requestFocus();
+    }
+  }
+
+  void _onActionPressed(GameAction action) {
     switch (action) {
       case GameAction.moveLeft:
         _dasRepeater.press(-1);
@@ -1503,7 +1559,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     }
   }
 
-  void _onGamepadActionReleased(GameAction action) {
+  void _onActionReleased(GameAction action) {
     switch (action) {
       case GameAction.moveLeft:
         _dasRepeater.release(-1);
@@ -1782,7 +1838,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     // mid-round would silently abandon the game (and forfeit a versus
     // match). Leaving is always an explicit button: the pause/game-over
     // menu in solo, the result overlay in versus.
-    return PopScope(
+    Widget page = PopScope(
       canPop: false,
       child: Scaffold(
         body: SafeArea(
@@ -1801,6 +1857,22 @@ class _TetrisGamePageState extends State<TetrisGamePage>
         ),
       ),
     );
+    final keyboardFocusNode = _keyboardFocusNode;
+    if (keyboardFocusNode != null) {
+      // Wraps the whole page (desktop only). `skipTraversal` keeps this node
+      // out of the menu overlays' arrow/Tab navigation while still letting it
+      // hold focus for gameplay; overlay buttons are descendants, so their
+      // key events bubble through here and gameplay keys still land while the
+      // board is live.
+      page = Focus(
+        focusNode: keyboardFocusNode,
+        autofocus: true,
+        skipTraversal: true,
+        onKeyEvent: _handleKeyEvent,
+        child: page,
+      );
+    }
+    return page;
   }
 
   /// Persists the round (solo only; no-op for finished games) and returns to

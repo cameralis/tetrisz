@@ -1,9 +1,11 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 const tetrisGamepadBindingsPreferenceKey = 'tetris.gamepadBindings';
 const tetrisTouchBindingsPreferenceKey = 'tetris.touchBindings';
+const tetrisKeyboardBindingsPreferenceKey = 'tetris.keyboardBindings';
 
 /// A rebindable gameplay command. Gamepad controls and touch gestures both
 /// resolve to one of these before reaching the engine.
@@ -142,6 +144,120 @@ class GamepadBindings {
     for (final entry in _map.entries) entry.key.name: entry.value.name,
   });
 }
+
+/// The physical-keyboard control → action map (desktop only). Mirrors
+/// [GamepadBindings]: immutable, rebinding produces a new instance, and the
+/// persisted JSON — keyed by [LogicalKeyboardKey.keyId] — is the complete
+/// truth. Several keys may share one action; a key absent from the map is
+/// unbound.
+@immutable
+class KeyboardBindings {
+  const KeyboardBindings(this._map);
+
+  /// The default desktop scheme: the arrows move and soft drop, Up and X
+  /// rotate clockwise, Z and Left Ctrl rotate counterclockwise, Space hard
+  /// drops, C and Left Shift hold, and Esc or P pauses.
+  static final Map<LogicalKeyboardKey, GameAction> standardDefaults = {
+    LogicalKeyboardKey.arrowLeft: GameAction.moveLeft,
+    LogicalKeyboardKey.arrowRight: GameAction.moveRight,
+    LogicalKeyboardKey.arrowDown: GameAction.softDrop,
+    LogicalKeyboardKey.arrowUp: GameAction.rotateClockwise,
+    LogicalKeyboardKey.keyX: GameAction.rotateClockwise,
+    LogicalKeyboardKey.keyZ: GameAction.rotateCounterClockwise,
+    LogicalKeyboardKey.controlLeft: GameAction.rotateCounterClockwise,
+    LogicalKeyboardKey.space: GameAction.hardDrop,
+    LogicalKeyboardKey.keyC: GameAction.hold,
+    LogicalKeyboardKey.shiftLeft: GameAction.hold,
+    LogicalKeyboardKey.escape: GameAction.pause,
+    LogicalKeyboardKey.keyP: GameAction.pause,
+  };
+
+  factory KeyboardBindings.standard() => KeyboardBindings(standardDefaults);
+
+  /// Parses persisted bindings; `null` or malformed input falls back to the
+  /// standard defaults, unparseable key ids and unknown actions are skipped.
+  /// A well-formed but empty map means the player unbound everything.
+  factory KeyboardBindings.decode(String? json) {
+    if (json == null) {
+      return KeyboardBindings.standard();
+    }
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(json);
+    } on FormatException {
+      return KeyboardBindings.standard();
+    }
+    if (decoded is! Map<String, dynamic>) {
+      return KeyboardBindings.standard();
+    }
+    final map = <LogicalKeyboardKey, GameAction>{};
+    for (final entry in decoded.entries) {
+      final keyId = int.tryParse(entry.key);
+      final action = GameAction.tryParse(entry.value as String?);
+      if (keyId != null && action != null) {
+        map[LogicalKeyboardKey(keyId)] = action;
+      }
+    }
+    return KeyboardBindings(map);
+  }
+
+  final Map<LogicalKeyboardKey, GameAction> _map;
+
+  GameAction? actionFor(LogicalKeyboardKey key) => _map[key];
+
+  List<LogicalKeyboardKey> keysFor(GameAction action) => [
+    for (final entry in _map.entries)
+      if (entry.value == action) entry.key,
+  ];
+
+  KeyboardBindings bind(LogicalKeyboardKey key, GameAction action) =>
+      KeyboardBindings({..._map, key: action});
+
+  KeyboardBindings unbind(LogicalKeyboardKey key) =>
+      KeyboardBindings({..._map}..remove(key));
+
+  String encode() => jsonEncode({
+    for (final entry in _map.entries)
+      entry.key.keyId.toString(): entry.value.name,
+  });
+}
+
+/// A short, human-readable label for a bound key, for the rebinding UI.
+/// [LogicalKeyboardKey.debugName] is null in release builds, so the common
+/// keys are named explicitly and the rest fall back to the printable label.
+String describeLogicalKey(LogicalKeyboardKey key) {
+  final named = _keyDisplayNames[key];
+  if (named != null) {
+    return named;
+  }
+  final label = key.keyLabel;
+  if (label.trim().isNotEmpty) {
+    return label.length == 1 ? label.toUpperCase() : label;
+  }
+  return 'Key 0x${key.keyId.toRadixString(16)}';
+}
+
+final _keyDisplayNames = <LogicalKeyboardKey, String>{
+  LogicalKeyboardKey.arrowLeft: 'Left Arrow',
+  LogicalKeyboardKey.arrowRight: 'Right Arrow',
+  LogicalKeyboardKey.arrowUp: 'Up Arrow',
+  LogicalKeyboardKey.arrowDown: 'Down Arrow',
+  LogicalKeyboardKey.space: 'Space',
+  LogicalKeyboardKey.escape: 'Esc',
+  LogicalKeyboardKey.enter: 'Enter',
+  LogicalKeyboardKey.numpadEnter: 'Numpad Enter',
+  LogicalKeyboardKey.tab: 'Tab',
+  LogicalKeyboardKey.backspace: 'Backspace',
+  LogicalKeyboardKey.delete: 'Delete',
+  LogicalKeyboardKey.shiftLeft: 'Left Shift',
+  LogicalKeyboardKey.shiftRight: 'Right Shift',
+  LogicalKeyboardKey.controlLeft: 'Left Ctrl',
+  LogicalKeyboardKey.controlRight: 'Right Ctrl',
+  LogicalKeyboardKey.altLeft: 'Left Alt',
+  LogicalKeyboardKey.altRight: 'Right Alt',
+  LogicalKeyboardKey.metaLeft: 'Left Cmd',
+  LogicalKeyboardKey.metaRight: 'Right Cmd',
+};
 
 /// A rebindable touch gesture on the board surface. Horizontal dragging is
 /// the movement scheme itself and stays fixed.

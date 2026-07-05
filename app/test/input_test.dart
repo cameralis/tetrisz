@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gamepads/gamepads.dart';
 import 'package:tetris/src/input/control_bindings.dart';
@@ -181,6 +182,114 @@ void main() {
       final decoded = TouchBindings.decode('{"tapRight":"hold"}');
       expect(decoded.actionFor(TouchGesture.tapRight), GameAction.hold);
       expect(decoded.actionFor(TouchGesture.swipeDown), GameAction.hardDrop);
+    });
+  });
+
+  group('KeyboardBindings', () {
+    test('standard defaults follow the desktop scheme', () {
+      final bindings = KeyboardBindings.standard();
+      expect(
+        bindings.actionFor(LogicalKeyboardKey.arrowLeft),
+        GameAction.moveLeft,
+      );
+      expect(
+        bindings.actionFor(LogicalKeyboardKey.arrowRight),
+        GameAction.moveRight,
+      );
+      expect(
+        bindings.actionFor(LogicalKeyboardKey.arrowDown),
+        GameAction.softDrop,
+      );
+      // Up and X rotate clockwise; Z and Left Ctrl rotate counterclockwise.
+      expect(
+        bindings.actionFor(LogicalKeyboardKey.arrowUp),
+        GameAction.rotateClockwise,
+      );
+      expect(
+        bindings.actionFor(LogicalKeyboardKey.keyX),
+        GameAction.rotateClockwise,
+      );
+      expect(
+        bindings.actionFor(LogicalKeyboardKey.keyZ),
+        GameAction.rotateCounterClockwise,
+      );
+      expect(
+        bindings.actionFor(LogicalKeyboardKey.controlLeft),
+        GameAction.rotateCounterClockwise,
+      );
+      expect(
+        bindings.actionFor(LogicalKeyboardKey.space),
+        GameAction.hardDrop,
+      );
+      expect(bindings.actionFor(LogicalKeyboardKey.keyC), GameAction.hold);
+      expect(
+        bindings.actionFor(LogicalKeyboardKey.shiftLeft),
+        GameAction.hold,
+      );
+      expect(bindings.actionFor(LogicalKeyboardKey.escape), GameAction.pause);
+      expect(bindings.actionFor(LogicalKeyboardKey.keyP), GameAction.pause);
+      // Anything unbound stays null.
+      expect(bindings.actionFor(LogicalKeyboardKey.keyQ), isNull);
+    });
+
+    test('encode/decode round trip preserves custom bindings', () {
+      final custom = KeyboardBindings.standard()
+          .bind(LogicalKeyboardKey.keyW, GameAction.hardDrop)
+          .unbind(LogicalKeyboardKey.space);
+      final decoded = KeyboardBindings.decode(custom.encode());
+      expect(
+        decoded.actionFor(LogicalKeyboardKey.keyW),
+        GameAction.hardDrop,
+      );
+      expect(decoded.actionFor(LogicalKeyboardKey.space), isNull);
+      expect(
+        decoded.actionFor(LogicalKeyboardKey.arrowLeft),
+        GameAction.moveLeft,
+      );
+    });
+
+    test('decode falls back to the standard defaults on bad input', () {
+      expect(
+        KeyboardBindings.decode(null).actionFor(LogicalKeyboardKey.space),
+        GameAction.hardDrop,
+      );
+      expect(
+        KeyboardBindings.decode('not json').actionFor(LogicalKeyboardKey.space),
+        GameAction.hardDrop,
+      );
+      expect(
+        KeyboardBindings.decode('[1,2]').actionFor(LogicalKeyboardKey.space),
+        GameAction.hardDrop,
+      );
+    });
+
+    test('decode skips unparseable key ids and unknown actions', () {
+      final decoded = KeyboardBindings.decode(
+        '{"notAKey":"hardDrop","${LogicalKeyboardKey.space.keyId}":"teleport",'
+        '"${LogicalKeyboardKey.keyW.keyId}":"hold"}',
+      );
+      expect(decoded.actionFor(LogicalKeyboardKey.space), isNull);
+      expect(decoded.actionFor(LogicalKeyboardKey.keyW), GameAction.hold);
+    });
+
+    test('keysFor lists every key bound to an action', () {
+      final bindings = KeyboardBindings.standard();
+      expect(bindings.keysFor(GameAction.hold), [
+        LogicalKeyboardKey.keyC,
+        LogicalKeyboardKey.shiftLeft,
+      ]);
+      final rebound = bindings.bind(
+        LogicalKeyboardKey.keyC,
+        GameAction.pause,
+      );
+      expect(rebound.keysFor(GameAction.hold), [LogicalKeyboardKey.shiftLeft]);
+    });
+
+    test('describeLogicalKey produces friendly labels', () {
+      expect(describeLogicalKey(LogicalKeyboardKey.arrowLeft), 'Left Arrow');
+      expect(describeLogicalKey(LogicalKeyboardKey.space), 'Space');
+      expect(describeLogicalKey(LogicalKeyboardKey.escape), 'Esc');
+      expect(describeLogicalKey(LogicalKeyboardKey.keyZ), 'Z');
     });
   });
 
