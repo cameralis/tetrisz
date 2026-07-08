@@ -11,6 +11,7 @@ import '../net/versus_session.dart';
 import 'components.dart';
 import 'tetris_app.dart';
 import 'theme.dart';
+import 'toasts.dart';
 
 enum _LobbyStage { idle, connecting, waiting, error }
 
@@ -117,6 +118,18 @@ class _LobbyPageState extends State<LobbyPage> {
     switch (envelope) {
       case JoinedEnvelope():
         _isHost = envelope.isHost;
+      case PeerJoinedEnvelope():
+        TetrisToastHost.show(
+          'Opponent joined the room',
+          icon: Icons.person_add_alt_1_rounded,
+          accent: TetrisColors.ok,
+        );
+      case PeerLeftEnvelope():
+        TetrisToastHost.show(
+          'Opponent left the room',
+          icon: Icons.person_off_rounded,
+          accent: TetrisColors.danger,
+        );
       case StartEnvelope():
         if (_handedOff) {
           return;

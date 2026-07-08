@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../net/leaderboard_client.dart';
 import 'components.dart';
 import 'theme.dart';
+import 'toasts.dart';
 
 const tetrisPlayerNamePreferenceKey = 'tetris.playerName';
 const _highScorePreferenceKey = 'tetris.highScore';
@@ -84,21 +85,20 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            rank == null
-                ? 'Submitted — outside the global top list for now.'
-                : 'Your best is global rank #$rank',
-          ),
-        ),
+      TetrisToastHost.show(
+        rank == null
+            ? 'Submitted — outside the global top list for now.'
+            : 'Your best is global rank #$rank',
+        icon: Icons.emoji_events_rounded,
       );
       _refresh();
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Submit failed: $error')));
+        TetrisToastHost.show(
+          'Submit failed: $error',
+          icon: Icons.error_outline_rounded,
+          accent: TetrisColors.danger,
+        );
       }
     } finally {
       if (mounted) {

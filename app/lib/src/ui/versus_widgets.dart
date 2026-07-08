@@ -37,15 +37,18 @@ class OpponentBoardView extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text(
-                      'OPPONENT',
-                      style: TextStyle(
-                        color: _mutedTextColor,
-                        fontSize: 9,
-                        letterSpacing: 1.2,
-                        fontWeight: FontWeight.w600,
+                    const Expanded(
+                      child: Text(
+                        'OPPONENT',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: _mutedTextColor,
+                          fontSize: 9,
+                          letterSpacing: 1.2,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                     if ((snapshot?.pendingGarbage ?? 0) > 0)

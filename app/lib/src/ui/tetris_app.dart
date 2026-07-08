@@ -16,6 +16,7 @@ import '../input/das_repeater.dart';
 import '../input/gamepad_service.dart';
 import '../input/gamepad_ui_navigator.dart';
 import '../net/leaderboard_client.dart';
+import '../net/protocol.dart';
 import '../net/versus_session.dart';
 import '../platform_support.dart';
 import 'board_painting.dart';
@@ -23,6 +24,7 @@ import 'components.dart';
 import 'home_page.dart';
 import 'leaderboard_page.dart';
 import 'theme.dart';
+import 'toasts.dart';
 import 'ui_sounds.dart';
 import 'versus_widgets.dart';
 
@@ -387,11 +389,12 @@ class _TetrisAppState extends State<TetrisApp> {
       debugShowCheckedModeBanner: false,
       navigatorKey: _navigatorKey,
       // Above the Navigator so every route, dialog and overlay is
-      // controller-navigable (d-pad moves focus, South activates, East pops).
+      // controller-navigable (d-pad moves focus, South activates, East pops)
+      // and toasts land on top of everything.
       builder: (context, child) => GamepadUiNavigator(
         gamepad: widget.gamepad,
         navigatorKey: _navigatorKey,
-        child: child ?? const SizedBox.shrink(),
+        child: TetrisToastHost(child: child ?? const SizedBox.shrink()),
       ),
       theme: ThemeData(
         useMaterial3: true,
@@ -474,6 +477,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   TetrisMusicPlayer? _musicPlayer;
   StreamSubscription<void>? _musicCompleteSubscription;
   StreamSubscription<GamepadControlEvent>? _gamepadSubscription;
+  StreamSubscription<ServerEnvelope>? _versusEnvelopeSubscription;
   GamepadBindings _gamepadBindings = GamepadBindings.guideline();
   TouchBindings _touchBindings = TouchBindings.defaults();
   KeyboardBindings _keyboardBindings = KeyboardBindings.standard();
@@ -556,6 +560,9 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       session.gameNotifier.addListener(_onVersusGameSwapped);
       session.phase.addListener(_onVersusStateChanged);
       session.opponent.addListener(_onVersusStateChanged);
+      _versusEnvelopeSubscription = session.room.envelopes.listen(
+        _onVersusEnvelope,
+      );
     }
     _preferencesFuture = _loadPreferences();
     final soundEffects = widget.soundEffects;
@@ -631,6 +638,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       session.gameNotifier.removeListener(_onVersusGameSwapped);
       session.phase.removeListener(_onVersusStateChanged);
       session.opponent.removeListener(_onVersusStateChanged);
+      unawaited(_versusEnvelopeSubscription?.cancel() ?? Future.value());
       unawaited(session.dispose());
     }
     _lineClearSnapImage?.dispose();
@@ -804,6 +812,27 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   void _onVersusStateChanged() {
     if (mounted) {
       setState(() {});
+    }
+  }
+
+  /// Room lifecycle toasts during a match; the session itself handles the
+  /// grace timer and phase changes.
+  void _onVersusEnvelope(ServerEnvelope envelope) {
+    switch (envelope) {
+      case PeerLeftEnvelope():
+        TetrisToastHost.show(
+          'Opponent disconnected — waiting for them to return',
+          icon: Icons.link_off_rounded,
+          accent: TetrisColors.danger,
+        );
+      case PeerRejoinedEnvelope():
+        TetrisToastHost.show(
+          'Opponent reconnected',
+          icon: Icons.link_rounded,
+          accent: TetrisColors.ok,
+        );
+      default:
+        break;
     }
   }
 
