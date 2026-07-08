@@ -1218,8 +1218,10 @@ void main() {
 
     final impact = _boardImpactOffset(tester);
     expect(impact.dx, 0);
-    expect(impact.dy, greaterThan(0.32));
-    expect(impact.dy, lessThan(0.4));
+    // Impact depth scales with drop distance; a full-height drop lands near
+    // the 0.75-cell cap.
+    expect(impact.dy, greaterThan(0.55));
+    expect(impact.dy, lessThanOrEqualTo(0.75));
 
     await tester.pump(const Duration(milliseconds: 650));
     expect(_boardImpactOffset(tester).distance, greaterThan(0.01));

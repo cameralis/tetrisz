@@ -42,7 +42,12 @@ const _snapCommitDuration = Duration(milliseconds: 64);
 const _lineClearAnimationDuration = Duration(milliseconds: 520);
 const _lineClearDropDelay = Duration(milliseconds: 24);
 const _boardImpactDuration = Duration(milliseconds: 1200);
-const _boardImpactDownCells = 0.36;
+const _boardImpactMinCells = 0.2;
+const _boardImpactPerDropCell = 0.03;
+const _boardImpactMaxCells = 0.75;
+const _dustLifetime = Duration(milliseconds: 480);
+const _dustGravityCellsPerSecSq = 18.0;
+const _maxDustBursts = 6;
 const _boardSideImpactCells = 0.18;
 const _lineClearSnapShaderAsset = 'shaders/line_clear_snap.glsl';
 const _lineClearSnapTextureCellSize = 32.0;
@@ -408,6 +413,15 @@ class _TetrisAppState extends State<TetrisApp> {
           bodyColor: _text,
           displayColor: _text,
         ),
+        pageTransitionsTheme: const PageTransitionsTheme(
+          builders: {
+            TargetPlatform.android: TetrisPageTransitionsBuilder(),
+            TargetPlatform.iOS: TetrisPageTransitionsBuilder(),
+            TargetPlatform.macOS: TetrisPageTransitionsBuilder(),
+            TargetPlatform.linux: TetrisPageTransitionsBuilder(),
+            TargetPlatform.windows: TetrisPageTransitionsBuilder(),
+          },
+        ),
       ),
       // Tests inject a game and land straight on the board; production boots
       // to the home menu.
@@ -519,6 +533,8 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   bool _countdownGoTail = false;
   VersusPhase? _lastVersusPhase;
   Timer? _countdownTailTimer;
+  final List<_DustBurst> _dustBursts = [];
+  final math.Random _dustRandom = math.Random();
 
   bool get _boardAcceptsInput =>
       !_game.paused && !_game.gameOver && !_lineClearAnimating;
@@ -860,6 +876,12 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     // Versus event drain runs every frame, even while the board is paused or
     // animating, so attacks and game-over reach the opponent immediately.
     widget.versusSession?.onLocalTick();
+    if (_dustBursts.isNotEmpty) {
+      final now = DateTime.now();
+      _dustBursts.removeWhere(
+        (burst) => now.difference(burst.spawnedAt) > _dustLifetime,
+      );
+    }
     _maybeSubmitLeaderboardScore();
     if (_game.gameOver) {
       _flushHighScore();
@@ -1084,6 +1106,12 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       _lineClearSnapshot = snapshot;
       _lineClearAnimating = true;
     });
+    // Crunch: the board jolts harder the more rows went down; a Tetris also
+    // kicks sideways.
+    final cleared = snapshot.rows.length;
+    _startBoardImpact(
+      Offset(cleared >= 4 ? 0.1 : 0.0, 0.1 + 0.09 * cleared),
+    );
     unawaited(_prepareLineClearSnapImage(snapshot, serial));
     unawaited(_runLineClearAnimation(serial));
   }
@@ -1442,6 +1470,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       return;
     }
     final impactOffset = _hardDropImpactOffset();
+    final dust = _buildHardDropDust();
     final lockCount = _game.lockCount;
     _stopSoftDrop();
     _snapBackController.stop();
@@ -1449,7 +1478,52 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _commitHardDrop();
     if (_game.lockCount > lockCount) {
       _startBoardImpact(impactOffset);
+      if (dust != null) {
+        _dustBursts.add(dust);
+        if (_dustBursts.length > _maxDustBursts) {
+          _dustBursts.removeAt(0);
+        }
+      }
     }
+  }
+
+  /// Dust kicked up where the piece lands, computed pre-drop from the ghost
+  /// position; more distance kicks harder.
+  _DustBurst? _buildHardDropDust() {
+    final piece = _game.active;
+    final distance = _game.hardDropDistance;
+    if (piece == null || distance < 1) {
+      return null;
+    }
+    final bottomByColumn = <int, int>{};
+    for (final cell in piece.cells) {
+      final landedY = cell.y + distance;
+      final existing = bottomByColumn[cell.x];
+      if (existing == null || landedY > existing) {
+        bottomByColumn[cell.x] = landedY;
+      }
+    }
+    final intensity = (0.5 + distance * 0.05).clamp(0.5, 1.4);
+    final particles = <_DustParticle>[];
+    for (final entry in bottomByColumn.entries) {
+      final visibleY = entry.value - TetrisGame.bufferRows;
+      if (visibleY < 0 || visibleY >= TetrisGame.visibleRows) {
+        continue;
+      }
+      for (var i = 0; i < 3; i += 1) {
+        particles.add(
+          _DustParticle(
+            cellX: entry.key + _dustRandom.nextDouble(),
+            cellY: visibleY + 1.0,
+            vx: (_dustRandom.nextDouble() - 0.5) * 6 * intensity,
+            vy: -(1.5 + _dustRandom.nextDouble() * 3.5) * intensity,
+            radius: 0.06 + _dustRandom.nextDouble() * 0.07,
+            tint: colorForTetromino(piece.type),
+          ),
+        );
+      }
+    }
+    return _DustBurst(spawnedAt: DateTime.now(), particles: particles);
   }
 
   void _commitHardDrop() {
@@ -1463,7 +1537,11 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   }
 
   Offset _hardDropImpactOffset() {
-    return const Offset(0, _boardImpactDownCells);
+    // Heavier the further the piece fell.
+    final depth = (_boardImpactMinCells +
+            _game.hardDropDistance * _boardImpactPerDropCell)
+        .clamp(_boardImpactMinCells, _boardImpactMaxCells);
+    return Offset(0, depth);
   }
 
   void _startBoardImpact(Offset impactOffset) {
@@ -2127,6 +2205,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
                     ? _lineClearSnapShader
                     : null,
                 lineClearSnapImage: _lineClearSnapImage,
+                dustBursts: _dustBursts,
               ),
               size: Size.infinite,
             ),
@@ -2877,6 +2956,35 @@ class _Metric extends StatelessWidget {
   }
 }
 
+/// One puff of landing dust; positions are derived from age so no per-frame
+/// mutation is needed.
+class _DustParticle {
+  const _DustParticle({
+    required this.cellX,
+    required this.cellY,
+    required this.vx,
+    required this.vy,
+    required this.radius,
+    required this.tint,
+  });
+
+  final double cellX;
+  final double cellY;
+
+  /// Velocities in cells/second; radius in cells.
+  final double vx;
+  final double vy;
+  final double radius;
+  final Color tint;
+}
+
+class _DustBurst {
+  _DustBurst({required this.spawnedAt, required this.particles});
+
+  final DateTime spawnedAt;
+  final List<_DustParticle> particles;
+}
+
 class _BoardPainter extends CustomPainter {
   const _BoardPainter({
     required this.game,
@@ -2886,6 +2994,7 @@ class _BoardPainter extends CustomPainter {
     required this.lineClearProgress,
     required this.lineClearSnapShader,
     required this.lineClearSnapImage,
+    this.dustBursts = const [],
   });
 
   final TetrisGame game;
@@ -2895,6 +3004,40 @@ class _BoardPainter extends CustomPainter {
   final double lineClearProgress;
   final ui.FragmentShader? lineClearSnapShader;
   final ui.Image? lineClearSnapImage;
+  final List<_DustBurst> dustBursts;
+
+  void _drawDust(Canvas canvas, Offset visibleOrigin, double cellSize) {
+    if (dustBursts.isEmpty) {
+      return;
+    }
+    final now = DateTime.now();
+    final lifetimeSeconds = _dustLifetime.inMilliseconds / 1000.0;
+    final paint = Paint();
+    for (final burst in dustBursts) {
+      final t =
+          (now.difference(burst.spawnedAt).inMicroseconds /
+                  _dustLifetime.inMicroseconds)
+              .clamp(0.0, 1.0);
+      if (t >= 1) {
+        continue;
+      }
+      final seconds = t * lifetimeSeconds;
+      final fade = (1 - t) * (1 - t);
+      for (final particle in burst.particles) {
+        final x = particle.cellX + particle.vx * seconds;
+        final y = particle.cellY +
+            particle.vy * seconds +
+            0.5 * _dustGravityCellsPerSecSq * seconds * seconds;
+        paint.color = Color.lerp(particle.tint, const Color(0xFFEDEFF2), 0.55)!
+            .withValues(alpha: 0.55 * fade);
+        canvas.drawCircle(
+          visibleOrigin + Offset(x * cellSize, y * cellSize),
+          particle.radius * cellSize * (1 - 0.35 * t),
+          paint,
+        );
+      }
+    }
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -2975,6 +3118,7 @@ class _BoardPainter extends CustomPainter {
         }
       }
     }
+    _drawDust(canvas, visibleOrigin, cellSize);
     canvas.restore();
   }
 

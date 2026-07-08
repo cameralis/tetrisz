@@ -210,6 +210,30 @@ class _TetrisPressableState extends State<TetrisPressable>
   }
 }
 
+/// Route transition themed after the falling blocks: the incoming page drops
+/// in from just above and settles, fading up fast.
+class TetrisPageTransitionsBuilder extends PageTransitionsBuilder {
+  const TetrisPageTransitionsBuilder();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    final drop = Tween<Offset>(
+      begin: const Offset(0, -0.045),
+      end: Offset.zero,
+    ).chain(CurveTween(curve: Curves.easeOutCubic)).animate(animation);
+    return FadeTransition(
+      opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut),
+      child: SlideTransition(position: drop, child: child),
+    );
+  }
+}
+
 enum TetrisButtonVariant { primary, secondary, danger, ghost }
 
 /// Chunky block-styled button: rests on a darker edge like a piece on the
