@@ -516,6 +516,9 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   bool _lineClearSnapWarmUpComplete = false;
   bool _leaderboardSubmitted = false;
   bool _gamepadClaimedForPlay = false;
+  bool _countdownGoTail = false;
+  VersusPhase? _lastVersusPhase;
+  Timer? _countdownTailTimer;
 
   bool get _boardAcceptsInput =>
       !_game.paused && !_game.gameOver && !_lineClearAnimating;
@@ -557,6 +560,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     _game = widget.game ?? widget.versusSession?.game ?? TetrisGame();
     final session = widget.versusSession;
     if (session != null) {
+      _lastVersusPhase = session.phase.value;
       session.gameNotifier.addListener(_onVersusGameSwapped);
       session.phase.addListener(_onVersusStateChanged);
       session.opponent.addListener(_onVersusStateChanged);
@@ -641,6 +645,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       unawaited(_versusEnvelopeSubscription?.cancel() ?? Future.value());
       unawaited(session.dispose());
     }
+    _countdownTailTimer?.cancel();
     _lineClearSnapImage?.dispose();
     _snapBackController.dispose();
     _lineClearController.dispose();
@@ -810,9 +815,22 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   }
 
   void _onVersusStateChanged() {
-    if (mounted) {
-      setState(() {});
+    if (!mounted) {
+      return;
     }
+    final phase = widget.versusSession?.phase.value;
+    if (_lastVersusPhase == VersusPhase.countdown &&
+        phase == VersusPhase.playing) {
+      _countdownGoTail = true;
+      _countdownTailTimer?.cancel();
+      _countdownTailTimer = Timer(CountdownOverlay.goTail, () {
+        if (mounted) {
+          setState(() => _countdownGoTail = false);
+        }
+      });
+    }
+    _lastVersusPhase = phase;
+    setState(() {});
   }
 
   /// Room lifecycle toasts during a match; the session itself handles the
@@ -2154,7 +2172,9 @@ class _TetrisGamePageState extends State<TetrisGamePage>
           child: OpponentBoardView(session: session),
         ),
       ),
-      if (session.phase.value == VersusPhase.countdown)
+      // Kept mounted briefly into `playing` so the GO burst can finish; the
+      // overlay ignores pointers so it never eats the first inputs.
+      if (session.phase.value == VersusPhase.countdown || _countdownGoTail)
         CountdownOverlay(
           key: ValueKey('countdown-${session.matchId}'),
           duration: session.countdownDuration,
