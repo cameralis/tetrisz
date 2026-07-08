@@ -20,7 +20,13 @@ enum UiSfx {
   back('sfx/counter_rotate.mp3', gain: 0.5),
 
   /// Toast landing (a hard drop's slam).
-  toast('sfx/hard_drop.mp3', gain: 0.5);
+  toast('sfx/hard_drop.mp3', gain: 0.5),
+
+  /// Match won: the level-up fanfare.
+  win('sfx/level_up.mp3', gain: 0.7),
+
+  /// Match lost: a heavy, muted lock thud.
+  lose('sfx/hard_lock.mp3', gain: 0.4);
 
   const UiSfx(this.assetPath, {required this.gain});
 

@@ -421,7 +421,224 @@ class _CountdownOverlayState extends State<CountdownOverlay>
   }
 }
 
-/// End-of-match overlay: WIN / LOSE / OPPONENT LEFT with rematch controls.
+/// Animated end-of-match content: WIN slams in with rising celebration minos,
+/// LOSE drops in heavy with a shake, OPPONENT LEFT slides in neutral. Shared
+/// by the centered compact overlay and the wide-layout side sheet.
+class VersusResultPanel extends StatefulWidget {
+  const VersusResultPanel({
+    super.key,
+    required this.session,
+    required this.onLeave,
+  });
+
+  final VersusSession session;
+  final VoidCallback onLeave;
+
+  @override
+  State<VersusResultPanel> createState() => _VersusResultPanelState();
+}
+
+class _VersusResultPanelState extends State<VersusResultPanel>
+    with TickerProviderStateMixin {
+  late final AnimationController _enter = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 750),
+  );
+  late final AnimationController _celebrate = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1600),
+  );
+
+  VersusPhase get _phase => widget.session.phase.value;
+
+  @override
+  void initState() {
+    super.initState();
+    _enter.addListener(() => setState(() {}));
+    _enter.forward();
+    switch (_phase) {
+      case VersusPhase.won:
+        _celebrate.repeat();
+        UiFeedback.play(UiSfx.win);
+      case VersusPhase.lost:
+        UiFeedback.play(UiSfx.lose);
+      default:
+        break;
+    }
+  }
+
+  @override
+  void dispose() {
+    _enter.dispose();
+    _celebrate.dispose();
+    super.dispose();
+  }
+
+  Widget _title() {
+    final (label, color) = switch (_phase) {
+      VersusPhase.won => ('YOU WIN', _accentColor),
+      VersusPhase.opponentLeft => ('OPPONENT LEFT', _accentColor),
+      _ => ('YOU LOSE', _garbageColor),
+    };
+    final t = _enter.value;
+    Widget text = Text(
+      label,
+      textAlign: TextAlign.center,
+      style: TextStyle(
+        color: color,
+        fontSize: 26,
+        fontWeight: FontWeight.w800,
+        letterSpacing: 2,
+        shadows: [Shadow(color: color.withValues(alpha: 0.4 * t), blurRadius: 22)],
+      ),
+    );
+
+    switch (_phase) {
+      case VersusPhase.won:
+        // Slam down to size with an overshoot.
+        final scale = 1.0 +
+            (1 - Curves.easeOutBack.transform(t.clamp(0.0, 1.0))) * 0.9;
+        text = Transform.scale(
+          scale: scale,
+          child: Opacity(opacity: Curves.easeOut.transform(t), child: text),
+        );
+      case VersusPhase.lost:
+        // Heavy fall then a decaying shake, like the countdown slam.
+        const fallFraction = 0.3;
+        final falling = t < fallFraction;
+        final fallT = falling ? t / fallFraction : 1.0;
+        final dy = falling ? -56.0 * (1 - Curves.easeIn.transform(fallT)) : 0.0;
+        final sinceImpact = falling ? 0.0 : (t - fallFraction) / (1 - fallFraction);
+        final amp = 6.0 * (1 - Curves.easeOutCubic.transform(sinceImpact));
+        final shake = falling
+            ? Offset.zero
+            : Offset(math.sin(t * 90) * amp, math.cos(t * 70) * amp * 0.6);
+        text = Transform.translate(
+          offset: Offset(0, dy) + shake,
+          child: Opacity(opacity: Curves.easeIn.transform(fallT), child: text),
+        );
+      default:
+        text = Opacity(opacity: Curves.easeOut.transform(t), child: text);
+    }
+
+    if (_phase != VersusPhase.won) {
+      return text;
+    }
+    // Celebration minos rising behind the title.
+    return SizedBox(
+      height: 78,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Positioned.fill(
+            child: AnimatedBuilder(
+              animation: _celebrate,
+              builder: (context, _) => CustomPaint(
+                painter: _CelebrationPainter(progress: _celebrate.value),
+              ),
+            ),
+          ),
+          text,
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final canRematch = _phase != VersusPhase.opponentLeft;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _title(),
+        const SizedBox(height: 6),
+        Text(
+          'Score ${widget.session.game.score}',
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: _mutedTextColor,
+            fontSize: 13,
+            fontFeatures: [FontFeature.tabularFigures()],
+          ),
+        ),
+        const SizedBox(height: 18),
+        if (canRematch) ...[
+          ValueListenableBuilder<bool>(
+            valueListenable: widget.session.localWantsRematch,
+            builder: (context, waiting, _) {
+              return TetrisButton(
+                variant: TetrisButtonVariant.primary,
+                // Pre-focused so a controller can confirm instantly.
+                autofocus: true,
+                onPressed: waiting ? null : widget.session.requestRematch,
+                child: Text(waiting ? 'Waiting for opponent…' : 'Rematch'),
+              );
+            },
+          ),
+          ValueListenableBuilder<bool>(
+            valueListenable: widget.session.opponentWantsRematch,
+            builder: (context, wants, _) {
+              if (!wants) {
+                return const SizedBox(height: 8);
+              }
+              return const Padding(
+                padding: EdgeInsets.symmetric(vertical: 6),
+                child: Text(
+                  'Opponent wants a rematch',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: _accentColor, fontSize: 12),
+                ),
+              );
+            },
+          ),
+        ],
+        TetrisButton(
+          variant: TetrisButtonVariant.ghost,
+          onPressed: widget.onLeave,
+          child: const Text('Leave match'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Small accent minos drifting up behind a WIN title.
+class _CelebrationPainter extends CustomPainter {
+  _CelebrationPainter({required this.progress});
+
+  final double progress;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint();
+    for (var i = 0; i < 9; i += 1) {
+      // Deterministic per-index phase and lane.
+      final phase = (progress + i * 0.31) % 1.0;
+      final x = size.width * ((i * 0.117 + 0.06) % 1.0);
+      final y = size.height * (1.15 - 1.4 * phase);
+      final wobble = math.sin((phase * 4 + i) * math.pi) * 3;
+      final alpha = (math.sin(phase * math.pi)).clamp(0.0, 1.0) * 0.5;
+      final side = 5.0 + (i % 3) * 2.5;
+      paint.color = (i.isEven ? _accentColor : const Color(0xFF58D957))
+          .withValues(alpha: alpha);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(x + wobble, y, side, side),
+          const Radius.circular(1.5),
+        ),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _CelebrationPainter oldDelegate) =>
+      oldDelegate.progress != progress;
+}
+
+/// Centered result treatment for narrow (portrait) layouts: dims the whole
+/// play area and floats the panel card over it.
 class VersusResultOverlay extends StatelessWidget {
   const VersusResultOverlay({
     super.key,
@@ -434,13 +651,6 @@ class VersusResultOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (title, color) = switch (session.phase.value) {
-      VersusPhase.won => ('YOU WIN', _accentColor),
-      VersusPhase.opponentLeft => ('OPPONENT LEFT', _accentColor),
-      _ => ('YOU LOSE', _garbageColor),
-    };
-    final canRematch = session.phase.value != VersusPhase.opponentLeft;
-
     return ColoredBox(
       color: Colors.black.withValues(alpha: 0.72),
       child: Center(
@@ -453,69 +663,57 @@ class VersusResultOverlay extends StatelessWidget {
             ),
             child: Padding(
               padding: const EdgeInsets.all(20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    title,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: color,
-                      fontSize: 26,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 2,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Score ${session.game.score}',
-                    style: const TextStyle(
-                      color: _mutedTextColor,
-                      fontSize: 13,
-                      fontFeatures: [FontFeature.tabularFigures()],
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  if (canRematch) ...[
-                    ValueListenableBuilder<bool>(
-                      valueListenable: session.localWantsRematch,
-                      builder: (context, waiting, _) {
-                        return TetrisButton(
-                          variant: TetrisButtonVariant.primary,
-                          // Pre-focused so a controller can confirm instantly.
-                          autofocus: true,
-                          onPressed: waiting ? null : session.requestRematch,
-                          child: Text(
-                            waiting ? 'Waiting for opponent…' : 'Rematch',
-                          ),
-                        );
-                      },
-                    ),
-                    ValueListenableBuilder<bool>(
-                      valueListenable: session.opponentWantsRematch,
-                      builder: (context, wants, _) {
-                        if (!wants) {
-                          return const SizedBox(height: 8);
-                        }
-                        return const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 6),
-                          child: Text(
-                            'Opponent wants a rematch',
-                            style: TextStyle(
-                              color: _accentColor,
-                              fontSize: 12,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ],
-                  TetrisButton(
-                    variant: TetrisButtonVariant.ghost,
-                    onPressed: onLeave,
-                    child: const Text('Leave match'),
-                  ),
-                ],
+              child: VersusResultPanel(session: session, onLeave: onLeave),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Side-sheet result treatment for wide/landscape layouts: slides in along
+/// the right edge so the final board state stays fully visible.
+class VersusResultSheet extends StatelessWidget {
+  const VersusResultSheet({
+    super.key,
+    required this.session,
+    required this.onLeave,
+  });
+
+  final VersusSession session;
+  final VoidCallback onLeave;
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 1.0, end: 0.0),
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+      builder: (context, offset, child) => FractionalTranslation(
+        translation: Offset(offset, 0),
+        child: child,
+      ),
+      child: DecoratedBox(
+        decoration: const BoxDecoration(
+          color: _panelColor,
+          border: Border(
+            left: BorderSide(color: TetrisColors.outlineFaint),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Color(0x88000000),
+              blurRadius: 32,
+              offset: Offset(-10, 0),
+            ),
+          ],
+        ),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Center(
+              child: SingleChildScrollView(
+                child: VersusResultPanel(session: session, onLeave: onLeave),
               ),
             ),
           ),

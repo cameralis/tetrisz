@@ -1978,11 +1978,10 @@ class _TetrisGamePageState extends State<TetrisGamePage>
               final compact =
                   constraints.maxWidth < 760 || constraints.maxHeight < 500;
 
-              if (compact) {
-                return _buildCompactLayout(constraints);
-              }
-
-              return _buildWideLayout(constraints);
+              final layout = compact
+                  ? _buildCompactLayout(constraints)
+                  : _buildWideLayout(constraints);
+              return _wrapWithVersusResult(layout, constraints);
             },
           ),
         ),
@@ -2258,11 +2257,70 @@ class _TetrisGamePageState extends State<TetrisGamePage>
           key: ValueKey('countdown-${session.matchId}'),
           duration: session.countdownDuration,
         ),
-      if (session.phase.value == VersusPhase.won ||
-          session.phase.value == VersusPhase.lost ||
-          session.phase.value == VersusPhase.opponentLeft)
-        VersusResultOverlay(session: session, onLeave: _exitToMenu),
     ];
+  }
+
+  bool get _versusFinished => switch (widget.versusSession?.phase.value) {
+    VersusPhase.won || VersusPhase.lost || VersusPhase.opponentLeft => true,
+    _ => false,
+  };
+
+  /// Places the end-of-match UI: a right-edge sheet when there is enough
+  /// horizontal room beside the board (desktop, phone landscape) so the final
+  /// board stays fully visible, or a centered overlay on narrow portrait.
+  Widget _wrapWithVersusResult(Widget layout, BoxConstraints constraints) {
+    final session = widget.versusSession;
+    if (session == null || !_versusFinished) {
+      return layout;
+    }
+    final compact =
+        constraints.maxWidth < 760 || constraints.maxHeight < 500;
+    final boardWidth = compact
+        ? math.min(
+            constraints.maxWidth,
+            math.max(0.0, constraints.maxHeight - _compactTopBarHeight) *
+                _boardAspectRatio,
+          )
+        : math.min(
+            math.max(
+              0.0,
+              constraints.maxWidth -
+                  2 * (_wideSidePanelWidth + _wideSidePanelGap),
+            ),
+            math.min(constraints.maxHeight, 760.0) * _boardAspectRatio,
+          );
+    final sideSpace = (constraints.maxWidth - boardWidth) / 2;
+    final sheetWidth = math.min(300.0, sideSpace - 12);
+    if (sheetWidth >= 220) {
+      return Stack(
+        children: [
+          layout,
+          Positioned(
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: sheetWidth,
+            child: VersusResultSheet(
+              key: const ValueKey('versus-result-sheet'),
+              session: session,
+              onLeave: _exitToMenu,
+            ),
+          ),
+        ],
+      );
+    }
+    return Stack(
+      children: [
+        layout,
+        Positioned.fill(
+          child: VersusResultOverlay(
+            key: const ValueKey('versus-result-overlay'),
+            session: session,
+            onLeave: _exitToMenu,
+          ),
+        ),
+      ],
+    );
   }
 }
 
