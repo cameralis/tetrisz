@@ -83,9 +83,10 @@ async function createRoom(): Promise<string> {
   return body.code;
 }
 
-async function join(code: string): Promise<SocketProbe> {
+async function join(code: string, version?: number): Promise<SocketProbe> {
+  const suffix = version === undefined ? "" : `?v=${version}`;
   const response = await SELF.fetch(
-    `https://example.com/api/rooms/${code}/ws`,
+    `https://example.com/api/rooms/${code}/ws${suffix}`,
     { headers: { Upgrade: "websocket" } },
   );
   expect(response.status).toBe(101);
@@ -95,6 +96,9 @@ async function join(code: string): Promise<SocketProbe> {
   }
   return new SocketProbe(ws);
 }
+
+const ready = (probe: SocketProbe) =>
+  probe.ws.send(JSON.stringify({ t: "ready" }));
 
 describe("rooms", () => {
   it("creates a room and pairs two players with the same seed", async () => {
@@ -185,6 +189,87 @@ describe("rooms", () => {
     const guestSecond = await guest.nextWhere(isSecondStart, "second start");
     expect(hostSecond.seed).toBe(guestSecond.seed);
     expect(hostSecond.seed).not.toBe(first.seed);
+  });
+
+  it("gates the start on both v2 players sending ready", async () => {
+    const code = await createRoom();
+    const host = await join(code, 2);
+    const hostJoined = await host.next("joined");
+    expect(hostJoined.peerPresent).toBe(false);
+    expect(hostJoined.peerReady).toBe(false);
+
+    const guest = await join(code, 2);
+    const guestJoined = await guest.next("joined");
+    expect(guestJoined.peerPresent).toBe(true);
+    expect(guestJoined.peerReady).toBe(false);
+    await host.next("peer_joined");
+
+    ready(host);
+    const peerReady = await guest.next("peer_ready");
+    expect(peerReady.t).toBe("peer_ready");
+    // One ready is not enough.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(host.messages.filter((m) => m.t === "start")).toHaveLength(0);
+
+    ready(guest);
+    await host.next("peer_ready");
+    const hostStart = await host.next("start");
+    const guestStart = await guest.next("start");
+    expect(hostStart.seed).toBe(guestStart.seed);
+    expect(hostStart.matchId).toBe(1);
+  });
+
+  it("resets ready when a player disconnects during the ready phase", async () => {
+    const code = await createRoom();
+    const host = await join(code, 2);
+    const guest = await join(code, 2);
+    await guest.next("joined");
+
+    ready(host);
+    await guest.next("peer_ready");
+    host.ws.close();
+    await guest.next("peer_left");
+
+    const hostBack = await join(code, 2);
+    const joined = await hostBack.next("joined");
+    // The guest never readied; the returning host's own flag was reset too.
+    expect(joined.peerReady).toBe(false);
+
+    ready(guest);
+    await hostBack.next("peer_ready");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(hostBack.messages.filter((m) => m.t === "start")).toHaveLength(0);
+
+    ready(hostBack);
+    await hostBack.next("start");
+    await guest.next("start");
+  });
+
+  it("auto-starts when a legacy client is in the pair", async () => {
+    const code = await createRoom();
+    const host = await join(code); // legacy, no ?v=
+    const guest = await join(code, 2);
+    await host.next("start");
+    await guest.next("start");
+  });
+
+  it("runs the rematch flow after a ready-gated first match", async () => {
+    const code = await createRoom();
+    const host = await join(code, 2);
+    const guest = await join(code, 2);
+    await guest.next("joined");
+    ready(host);
+    ready(guest);
+    await host.next("start");
+    await guest.next("start");
+
+    host.ws.send(JSON.stringify({ t: "rematch" }));
+    await guest.next("rematch_requested");
+    guest.ws.send(JSON.stringify({ t: "rematch" }));
+
+    const isSecondStart = (m: Envelope) => m.t === "start" && m.matchId === 2;
+    await host.nextWhere(isSecondStart, "second start");
+    await guest.nextWhere(isSecondStart, "second start");
   });
 
   it("reports rejoin=true when reconnecting to a started match", async () => {

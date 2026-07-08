@@ -4,6 +4,11 @@ import '../game/tetromino.dart';
 /// Wire protocol version for game messages.
 const int gameProtocolVersion = 1;
 
+/// Room WebSocket protocol version, sent as `?v=` on connect. v2 adds the
+/// ready-up phase: the server only starts a match once both players sent
+/// `ready` (legacy v1 pairs keep auto-starting).
+const int roomProtocolVersion = 2;
+
 /// WebSocket close codes the backend uses to reject a join.
 const int closeRoomNotFound = 4404;
 const int closeRoomFull = 4409;
@@ -29,9 +34,13 @@ sealed class ServerEnvelope {
         return JoinedEnvelope(
           role: role,
           rejoin: json['rejoin'] as bool? ?? false,
+          peerPresent: json['peerPresent'] as bool? ?? false,
+          peerReady: json['peerReady'] as bool? ?? false,
         );
       case 'peer_joined':
         return const PeerJoinedEnvelope();
+      case 'peer_ready':
+        return const PeerReadyEnvelope();
       case 'peer_rejoined':
         return const PeerRejoinedEnvelope();
       case 'peer_left':
@@ -58,16 +67,31 @@ sealed class ServerEnvelope {
 }
 
 final class JoinedEnvelope extends ServerEnvelope {
-  const JoinedEnvelope({required this.role, required this.rejoin});
+  const JoinedEnvelope({
+    required this.role,
+    required this.rejoin,
+    this.peerPresent = false,
+    this.peerReady = false,
+  });
 
   final String role;
   final bool rejoin;
+
+  /// Whether the other player is already connected (v2 ready phase).
+  final bool peerPresent;
+
+  /// Whether the other player has already sent `ready` (v2).
+  final bool peerReady;
 
   bool get isHost => role == 'host';
 }
 
 final class PeerJoinedEnvelope extends ServerEnvelope {
   const PeerJoinedEnvelope();
+}
+
+final class PeerReadyEnvelope extends ServerEnvelope {
+  const PeerReadyEnvelope();
 }
 
 final class PeerRejoinedEnvelope extends ServerEnvelope {

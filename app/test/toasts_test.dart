@@ -25,6 +25,8 @@ class FakeRoom implements RoomChannel {
   final envelopeController = StreamController<ServerEnvelope>.broadcast();
   final stateNotifier = ValueNotifier(RoomConnectionState.connected);
   final rttNotifier = ValueNotifier<Duration?>(null);
+  final failureNotifier = ValueNotifier<String?>(null);
+  int readiesSent = 0;
 
   @override
   String get code => 'TESTY';
@@ -39,10 +41,16 @@ class FakeRoom implements RoomChannel {
   ValueListenable<Duration?> get rtt => rttNotifier;
 
   @override
+  ValueListenable<String?> get failureReason => failureNotifier;
+
+  @override
   void sendSignal(Object? data) {}
 
   @override
   void sendRelay(Map<String, dynamic> data) {}
+
+  @override
+  void sendReady() => readiesSent += 1;
 
   @override
   void requestRematch() {}

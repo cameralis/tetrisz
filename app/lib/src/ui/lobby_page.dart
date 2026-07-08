@@ -12,11 +12,14 @@ import 'components.dart';
 import 'tetris_app.dart';
 import 'theme.dart';
 import 'toasts.dart';
+import 'ui_sounds.dart';
 
 enum _LobbyStage { idle, connecting, waiting, error }
 
-/// Create-or-join screen. Owns the [RoomClient] until the match starts, then
-/// hands it to a [VersusSession] and replaces itself with the game page.
+/// Create-or-join screen. Owns the [RoomChannel] until the match starts:
+/// once both players are in the room each must ready up; the server then
+/// sends `start` and the lobby hands the channel to a [VersusSession] and
+/// replaces itself with the game page.
 class LobbyPage extends StatefulWidget {
   const LobbyPage({
     super.key,
@@ -25,6 +28,9 @@ class LobbyPage extends StatefulWidget {
     this.soundEffects,
     this.haptics,
     this.gamepad,
+    this.createRoom,
+    this.joinRoom,
+    this.enableP2p = true,
   });
 
   final bool enableAudio;
@@ -32,6 +38,13 @@ class LobbyPage extends StatefulWidget {
   final TetrisSoundEffects? soundEffects;
   final TetrisHaptics? haptics;
   final GamepadService? gamepad;
+
+  /// Test seams; production uses [RoomClient.create] / [RoomClient.join].
+  final Future<RoomChannel> Function()? createRoom;
+  final RoomChannel Function(String code)? joinRoom;
+
+  /// Tests disable this so no WebRTC platform channels are touched.
+  final bool enableP2p;
 
   @override
   State<LobbyPage> createState() => _LobbyPageState();
@@ -43,8 +56,11 @@ class _LobbyPageState extends State<LobbyPage> {
   String? _roomCode;
   String? _error;
   bool _isHost = false;
+  bool _peerPresent = false;
+  bool _localReady = false;
+  bool _opponentReady = false;
   bool _handedOff = false;
-  RoomClient? _client;
+  RoomChannel? _client;
   StreamSubscription<ServerEnvelope>? _subscription;
 
   @override
@@ -63,7 +79,7 @@ class _LobbyPageState extends State<LobbyPage> {
       _error = null;
     });
     try {
-      final client = await RoomClient.create();
+      final client = await (widget.createRoom?.call() ?? RoomClient.create());
       _adoptClient(client);
       setState(() {
         _roomCode = client.code;
@@ -91,10 +107,19 @@ class _LobbyPageState extends State<LobbyPage> {
       _roomCode = code;
       _error = null;
     });
-    _adoptClient(RoomClient.join(code));
+    _adoptClient(widget.joinRoom?.call(code) ?? RoomClient.join(code));
   }
 
-  void _adoptClient(RoomClient client) {
+  void _sendReady() {
+    final client = _client;
+    if (client == null || _localReady) {
+      return;
+    }
+    client.sendReady();
+    setState(() => _localReady = true);
+  }
+
+  void _adoptClient(RoomChannel client) {
     _client = client;
     client.failureReason.addListener(_onFailure);
     _subscription = client.envelopes.listen(_onEnvelope);
@@ -118,18 +143,33 @@ class _LobbyPageState extends State<LobbyPage> {
     switch (envelope) {
       case JoinedEnvelope():
         _isHost = envelope.isHost;
+        setState(() {
+          _peerPresent = envelope.peerPresent;
+          _opponentReady = envelope.peerReady;
+        });
       case PeerJoinedEnvelope():
+        setState(() {
+          _peerPresent = true;
+          _opponentReady = false;
+        });
         TetrisToastHost.show(
           'Opponent joined the room',
           icon: Icons.person_add_alt_1_rounded,
           accent: TetrisColors.ok,
         );
       case PeerLeftEnvelope():
+        setState(() {
+          _peerPresent = false;
+          _opponentReady = false;
+        });
         TetrisToastHost.show(
           'Opponent left the room',
           icon: Icons.person_off_rounded,
           accent: TetrisColors.danger,
         );
+      case PeerReadyEnvelope():
+        setState(() => _opponentReady = true);
+        UiFeedback.play(UiSfx.confirm);
       case StartEnvelope():
         if (_handedOff) {
           return;
@@ -142,7 +182,9 @@ class _LobbyPageState extends State<LobbyPage> {
         );
         // Kick off WebRTC negotiation; the match starts on relay and
         // promotes to P2P the moment the data channel opens.
-        VersusRtcCoordinator(session);
+        if (widget.enableP2p) {
+          VersusRtcCoordinator(session);
+        }
         Navigator.of(context).pushReplacement(
           MaterialPageRoute<void>(
             builder: (_) => TetrisGamePage(
@@ -245,39 +287,131 @@ class _LobbyPageState extends State<LobbyPage> {
   Widget _buildWaiting() {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const TetrisSectionHeader('ROOM CODE'),
-        SelectableText(
-          _roomCode ?? '',
-          key: const ValueKey('lobby-room-code'),
-          style: const TextStyle(
-            color: TetrisColors.text,
-            fontSize: 42,
-            letterSpacing: 12,
-            fontWeight: FontWeight.w800,
+        const Center(child: TetrisSectionHeader('ROOM CODE')),
+        Center(
+          child: SelectableText(
+            _roomCode ?? '',
+            key: const ValueKey('lobby-room-code'),
+            style: const TextStyle(
+              color: TetrisColors.text,
+              fontSize: 42,
+              letterSpacing: 12,
+              fontWeight: FontWeight.w800,
+            ),
           ),
         ),
         const SizedBox(height: 24),
-        const SizedBox(
-          width: 22,
-          height: 22,
-          child: CircularProgressIndicator(
-            strokeWidth: 2.4,
-            color: TetrisColors.accent,
+        if (!_peerPresent) ...[
+          const Center(
+            child: SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.4,
+                color: TetrisColors.accent,
+              ),
+            ),
           ),
-        ),
-        const SizedBox(height: 14),
-        const Text(
-          'Waiting for your opponent…',
-          style: TextStyle(color: TetrisColors.mutedText, fontSize: 13),
-        ),
-        const SizedBox(height: 30),
+          const SizedBox(height: 14),
+          const Text(
+            'Waiting for your opponent…',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: TetrisColors.mutedText, fontSize: 13),
+          ),
+        ] else ...[
+          Row(
+            children: [
+              Expanded(
+                child: _ReadyChip(
+                  key: const ValueKey('lobby-ready-you'),
+                  label: 'YOU',
+                  ready: _localReady,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _ReadyChip(
+                  key: const ValueKey('lobby-ready-opponent'),
+                  label: 'OPPONENT',
+                  ready: _opponentReady,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          TetrisButton(
+            key: const ValueKey('lobby-ready'),
+            variant: TetrisButtonVariant.primary,
+            autofocus: true,
+            onPressed: _localReady ? null : _sendReady,
+            child: Text(
+              _localReady ? 'Waiting for opponent…' : 'Ready up',
+            ),
+          ),
+        ],
+        const SizedBox(height: 22),
         TetrisButton(
           variant: TetrisButtonVariant.ghost,
           onPressed: () => Navigator.of(context).maybePop(),
           child: const Text('Cancel'),
         ),
       ],
+    );
+  }
+}
+
+/// Per-player readiness indicator in the pre-match lobby.
+class _ReadyChip extends StatelessWidget {
+  const _ReadyChip({super.key, required this.label, required this.ready});
+
+  final String label;
+  final bool ready;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: ready
+            ? Color.lerp(TetrisColors.panel, TetrisColors.ok, 0.16)!
+            : TetrisColors.panel,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: ready ? TetrisColors.ok : TetrisColors.outlineFaint,
+        ),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 9,
+            height: 9,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: ready ? TetrisColors.ok : TetrisColors.mutedText,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              ready ? '$label · READY' : label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: ready ? TetrisColors.text : TetrisColors.mutedText,
+                fontSize: 11,
+                letterSpacing: 1.1,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

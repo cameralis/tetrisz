@@ -5,10 +5,18 @@
 export type Role = "host" | "guest";
 
 export type ServerMessage =
-  | { t: "joined"; role: Role; rejoin: boolean }
+  | {
+      t: "joined";
+      role: Role;
+      rejoin: boolean;
+      // Present since protocol v2 (ready-up phase).
+      peerPresent: boolean;
+      peerReady: boolean;
+    }
   | { t: "peer_joined" }
   | { t: "peer_rejoined" }
   | { t: "peer_left" }
+  | { t: "peer_ready" }
   | { t: "start"; seed: number; matchId: number }
   | { t: "rematch_requested" }
   | { t: "signal"; d: unknown }
@@ -18,6 +26,7 @@ export type ServerMessage =
 export type ClientMessage =
   | { t: "signal"; d: unknown }
   | { t: "relay"; d: unknown }
+  | { t: "ready" }
   | { t: "rematch" }
   | { t: "ping" };
 

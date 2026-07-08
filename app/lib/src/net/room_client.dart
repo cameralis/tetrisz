@@ -17,8 +17,12 @@ abstract interface class RoomChannel {
   Stream<ServerEnvelope> get envelopes;
   ValueListenable<RoomConnectionState> get state;
   ValueListenable<Duration?> get rtt;
+
+  /// Human-readable reason when the connection permanently failed.
+  ValueListenable<String?> get failureReason;
   void sendSignal(Object? data);
   void sendRelay(Map<String, dynamic> data);
+  void sendReady();
   void requestRematch();
   Future<void> close();
 }
@@ -83,7 +87,8 @@ class RoomClient implements RoomChannel {
   final _rtt = ValueNotifier<Duration?>(null);
 
   /// Human-readable reason when [state] is [RoomConnectionState.failed].
-  final failureReason = ValueNotifier<String?>(null);
+  @override
+  final ValueNotifier<String?> failureReason = ValueNotifier<String?>(null);
 
   final List<String> _outgoingBuffer = [];
   WebSocketChannel? _channel;
@@ -110,6 +115,9 @@ class RoomClient implements RoomChannel {
   void sendRelay(Map<String, dynamic> data) => _send({'t': 'relay', 'd': data});
 
   @override
+  void sendReady() => _send({'t': 'ready'});
+
+  @override
   void requestRematch() => _send({'t': 'rematch'});
 
   @override
@@ -125,7 +133,11 @@ class RoomClient implements RoomChannel {
     if (_disposed) {
       return;
     }
-    final channel = _connector(backendWsUri('/api/rooms/$code/ws'));
+    final channel = _connector(
+      backendWsUri(
+        '/api/rooms/$code/ws',
+      ).replace(queryParameters: {'v': '$roomProtocolVersion'}),
+    );
     _channel = channel;
     _subscription = channel.stream.listen(
       _onData,

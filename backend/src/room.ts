@@ -9,6 +9,8 @@ import {
 
 interface Attachment {
   role: Role;
+  /** Client protocol version from the ws URL (`?v=`); 1 when absent. */
+  v: number;
 }
 
 // A room stays alive this long past its last join/start/rematch while sockets
@@ -50,13 +52,14 @@ export class RoomDO extends DurableObject {
       if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
         return new Response("expected websocket", { status: 426 });
       }
-      return this.acceptSocket(request);
+      const version = Number.parseInt(url.searchParams.get("v") ?? "1", 10);
+      return this.acceptSocket(Number.isFinite(version) ? version : 1);
     }
 
     return new Response("not found", { status: 404 });
   }
 
-  private async acceptSocket(_request: Request): Promise<Response> {
+  private async acceptSocket(version: number): Promise<Response> {
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];
@@ -80,17 +83,33 @@ export class RoomDO extends DurableObject {
     const takenRoles = new Set(live.map((ws) => this.roleOf(ws)));
     const role: Role = takenRoles.has("host") ? "guest" : "host";
     this.ctx.acceptWebSocket(server, [role]);
-    server.serializeAttachment({ role } satisfies Attachment);
+    server.serializeAttachment({ role, v: version } satisfies Attachment);
 
     const started = (await this.ctx.storage.get<boolean>("started")) ?? false;
-    this.send(server, { t: "joined", role, rejoin: started });
     const peer = this.peerOf(server);
+    const peerRole: Role = role === "host" ? "guest" : "host";
+    const peerReady =
+      peer !== undefined &&
+      ((await this.ctx.storage.get<boolean>(`ready:${peerRole}`)) ?? false);
+    this.send(server, {
+      t: "joined",
+      role,
+      rejoin: started,
+      peerPresent: peer !== undefined,
+      peerReady,
+    });
     if (peer !== undefined) {
       this.send(peer, { t: started ? "peer_rejoined" : "peer_joined" });
     }
 
     if (!started && this.liveSockets().length === 2) {
-      await this.startMatch();
+      // Ready-up gate (protocol v2). A legacy client never sends `ready`, so
+      // a pair including one starts immediately like it always did.
+      if (this.allSocketsAtLeast(2)) {
+        await this.maybeStartWhenBothReady();
+      } else {
+        await this.startMatch();
+      }
     } else {
       await this.ctx.storage.setAlarm(Date.now() + ROOM_TTL_MS);
     }
@@ -117,6 +136,10 @@ export class RoomDO extends DurableObject {
         this.peerOf(ws)?.send(message);
         break;
       }
+      case "ready": {
+        await this.handleReady(ws);
+        break;
+      }
       case "rematch": {
         await this.handleRematch(ws);
         break;
@@ -127,8 +150,15 @@ export class RoomDO extends DurableObject {
   }
 
   async webSocketClose(ws: WebSocket) {
-    if (this.roleOf(ws) === undefined) {
+    const role = this.roleOf(ws);
+    if (role === undefined) {
       return; // A socket we rejected at accept time.
+    }
+    // Leaving the ready phase forfeits the ready state; a rejoiner must
+    // ready up again.
+    const started = (await this.ctx.storage.get<boolean>("started")) ?? false;
+    if (!started) {
+      await this.ctx.storage.put(`ready:${role}`, false);
     }
     const peer = this.peerOf(ws);
     if (peer !== undefined) {
@@ -146,6 +176,39 @@ export class RoomDO extends DurableObject {
     }
     await this.ctx.storage.deleteAll();
     await this.ctx.storage.deleteAlarm();
+  }
+
+  private async handleReady(ws: WebSocket) {
+    const role = this.roleOf(ws);
+    if (role === undefined) {
+      return;
+    }
+    const started = (await this.ctx.storage.get<boolean>("started")) ?? false;
+    if (started) {
+      return; // Ready only gates the first match; rematches use `rematch`.
+    }
+    await this.ctx.storage.put(`ready:${role}`, true);
+    const peer = this.peerOf(ws);
+    if (peer !== undefined) {
+      this.send(peer, { t: "peer_ready" });
+    }
+    await this.maybeStartWhenBothReady();
+  }
+
+  private async maybeStartWhenBothReady() {
+    const hostReady =
+      (await this.ctx.storage.get<boolean>("ready:host")) ?? false;
+    const guestReady =
+      (await this.ctx.storage.get<boolean>("ready:guest")) ?? false;
+    if (hostReady && guestReady && this.liveSockets().length === 2) {
+      await this.startMatch();
+    } else {
+      await this.ctx.storage.setAlarm(Date.now() + ROOM_TTL_MS);
+    }
+  }
+
+  private allSocketsAtLeast(version: number): boolean {
+    return this.liveSockets().every((ws) => this.versionOf(ws) >= version);
   }
 
   private async handleRematch(ws: WebSocket) {
@@ -174,6 +237,8 @@ export class RoomDO extends DurableObject {
     await this.ctx.storage.put({
       started: true,
       matchIndex,
+      "ready:host": false,
+      "ready:guest": false,
       "rematch:host": false,
       "rematch:guest": false,
     });
@@ -203,6 +268,14 @@ export class RoomDO extends DurableObject {
       return (ws.deserializeAttachment() as Attachment | null)?.role;
     } catch {
       return undefined;
+    }
+  }
+
+  private versionOf(ws: WebSocket): number {
+    try {
+      return (ws.deserializeAttachment() as Attachment | null)?.v ?? 1;
+    } catch {
+      return 1;
     }
   }
 

@@ -67,8 +67,25 @@ void main() {
     expect(host.code, matches(RegExp(r'^[A-Z2-9]{5}$')));
 
     final hostStartFuture = awaitStart(host);
+    final hostSeesReady = host.envelopes
+        .firstWhere((envelope) => envelope is PeerReadyEnvelope)
+        .timeout(const Duration(seconds: 10));
     final guest = RoomClient.join(host.code);
     final guestStartFuture = awaitStart(guest);
+
+    // v2 ready-up gate: the match must not start until both send ready.
+    var startedEarly = false;
+    unawaited(hostStartFuture.then((_) => startedEarly = true));
+    await Future<void>.delayed(const Duration(milliseconds: 700));
+    expect(
+      startedEarly,
+      isFalse,
+      reason: 'match must not start before both players ready up',
+    );
+
+    guest.sendReady();
+    await hostSeesReady;
+    host.sendReady();
 
     final hostStart = await hostStartFuture;
     final guestStart = await guestStartFuture;

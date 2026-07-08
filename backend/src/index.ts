@@ -92,7 +92,8 @@ export default {
     if (wsMatch !== null && request.method === "GET") {
       const code = wsMatch[1].toUpperCase();
       const stub = env.ROOM.get(env.ROOM.idFromName(code));
-      return stub.fetch(new Request("https://room/ws", request));
+      // Keep the query string: it carries the client protocol version.
+      return stub.fetch(new Request(`https://room/ws${url.search}`, request));
     }
 
     return json({ error: "not_found" }, 404);
