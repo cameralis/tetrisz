@@ -246,6 +246,61 @@ class TransportChip extends StatelessWidget {
   }
 }
 
+/// "W 2 · L 1" chip: this room's session tally across rematches. Hidden
+/// until the first match ends.
+class SessionScoreChip extends StatelessWidget {
+  const SessionScoreChip({super.key, required this.session});
+
+  final VersusSession session;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: Listenable.merge([session.wins, session.losses]),
+      builder: (context, _) {
+        final wins = session.wins.value;
+        final losses = session.losses.value;
+        if (wins == 0 && losses == 0) {
+          return const SizedBox.shrink();
+        }
+        return DecoratedBox(
+          decoration: BoxDecoration(
+            color: _panelColor.withValues(alpha: 0.88),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            child: Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: 'W $wins',
+                    style: const TextStyle(color: Color(0xFF58D957)),
+                  ),
+                  const TextSpan(
+                    text: ' · ',
+                    style: TextStyle(color: _mutedTextColor),
+                  ),
+                  TextSpan(
+                    text: 'L $losses',
+                    style: const TextStyle(color: _garbageColor),
+                  ),
+                ],
+              ),
+              style: const TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.6,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 /// 3-2-1-GO shown while [VersusPhase.countdown] is active (plus a short GO
 /// tail after play begins — the parent keeps it mounted briefly).
 ///
@@ -562,7 +617,26 @@ class _VersusResultPanelState extends State<VersusResultPanel>
             fontFeatures: [FontFeature.tabularFigures()],
           ),
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 10),
+        AnimatedBuilder(
+          animation: Listenable.merge([
+            widget.session.wins,
+            widget.session.losses,
+          ]),
+          builder: (context, _) => Text(
+            'THIS ROOM · YOU ${widget.session.wins.value} — '
+            '${widget.session.losses.value} THEM',
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: _mutedTextColor,
+              fontSize: 11,
+              letterSpacing: 1.1,
+              fontWeight: FontWeight.w600,
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
         if (canRematch) ...[
           ValueListenableBuilder<bool>(
             valueListenable: widget.session.localWantsRematch,

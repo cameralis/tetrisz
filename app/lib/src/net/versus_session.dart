@@ -60,6 +60,12 @@ class VersusSession {
   final opponentWantsRematch = ValueNotifier<bool>(false);
   final localWantsRematch = ValueNotifier<bool>(false);
 
+  /// Session tally across rematches in this room; the opponent abandoning a
+  /// live match counts as a win. Lives as long as the session (i.e. until
+  /// the player leaves the room) and is never persisted.
+  final wins = ValueNotifier<int>(0);
+  final losses = ValueNotifier<int>(0);
+
   static const _stateSendInterval = Duration(milliseconds: 150);
 
   StreamSubscription<ServerEnvelope>? _envelopeSubscription;
@@ -131,6 +137,8 @@ class VersusSession {
     opponent.dispose();
     opponentWantsRematch.dispose();
     localWantsRematch.dispose();
+    wins.dispose();
+    losses.dispose();
     gameNotifier.dispose();
   }
 
@@ -199,6 +207,15 @@ class VersusSession {
     _countdownTimer?.cancel();
     _graceTimer?.cancel();
     game.paused = true;
+    // Tally before the phase flips so listeners see consistent numbers.
+    switch (result) {
+      case VersusPhase.won || VersusPhase.opponentLeft:
+        wins.value += 1;
+      case VersusPhase.lost:
+        losses.value += 1;
+      default:
+        break;
+    }
     phase.value = result;
   }
 

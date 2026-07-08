@@ -117,12 +117,18 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     final room = FakeRoom();
-    await _pumpFinishedMatch(tester, room, VersusPhase.won);
+    final session = await _pumpFinishedMatch(tester, room, VersusPhase.won);
 
     expect(find.byKey(const ValueKey('versus-result-sheet')), findsOneWidget);
     expect(find.byKey(const ValueKey('versus-result-overlay')), findsNothing);
     expect(find.text('YOU WIN'), findsOneWidget);
     expect(sounds.played, contains(UiSfx.win));
+
+    // Session tally renders on the end panel.
+    session.wins.value = 2;
+    session.losses.value = 1;
+    await tester.pump();
+    expect(find.text('THIS ROOM · YOU 2 — 1 THEM'), findsOneWidget);
 
     final sheetLeft = tester
         .getTopLeft(find.byKey(const ValueKey('versus-result-sheet')))

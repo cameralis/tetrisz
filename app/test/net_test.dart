@@ -414,5 +414,49 @@ void main() {
 
       await session.dispose();
     });
+
+    test('session tallies wins, losses and forfeit wins across rematches',
+        () async {
+      final room = FakeRoom();
+      final relay = FakeTransport(TransportKind.relay);
+      final failover = FailoverTransport(relay: relay);
+      final session = makeSession(
+        room,
+        failover,
+        grace: const Duration(milliseconds: 30),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      // Match 1: opponent tops out — a win.
+      relay.incoming.add(const GameOverMsg(seq: 1));
+      await pump();
+      expect(session.wins.value, 1);
+      expect(session.losses.value, 0);
+
+      // Match 2: we top out — a loss.
+      room.envelopeController.add(const StartEnvelope(seed: 2, matchId: 2));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      final game = session.game;
+      for (var y = 0; y < TetrisGame.totalRows - 2; y += 1) {
+        for (var x = 1; x < TetrisGame.width; x += 1) {
+          game.setCell(x, y, Tetromino.z);
+        }
+      }
+      game.hardDrop();
+      session.onLocalTick();
+      expect(session.wins.value, 1);
+      expect(session.losses.value, 1);
+
+      // Match 3: opponent abandons — a forfeit win.
+      room.envelopeController.add(const StartEnvelope(seed: 3, matchId: 3));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      room.envelopeController.add(const PeerLeftEnvelope());
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      expect(session.phase.value, VersusPhase.opponentLeft);
+      expect(session.wins.value, 2);
+      expect(session.losses.value, 1);
+
+      await session.dispose();
+    });
   });
 }

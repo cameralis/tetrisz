@@ -2239,7 +2239,14 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       Positioned(
         right: 6,
         top: 6,
-        child: TransportChip(session: session),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SessionScoreChip(session: session),
+            const SizedBox(width: 6),
+            TransportChip(session: session),
+          ],
+        ),
       ),
       Positioned(
         right: 6,
