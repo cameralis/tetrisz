@@ -8,12 +8,9 @@ import '../net/protocol.dart';
 import '../net/room_client.dart';
 import '../net/rtc_session.dart';
 import '../net/versus_session.dart';
+import 'components.dart';
 import 'tetris_app.dart';
-
-const _textColor = Color(0xFFF3F6FA);
-const _mutedTextColor = Color(0xFFA5ADBA);
-const _accentColor = Color(0xFF44D7FF);
-const _errorColor = Color(0xFFFF4D5E);
+import 'theme.dart';
 
 enum _LobbyStage { idle, connecting, waiting, error }
 
@@ -155,7 +152,10 @@ class _LobbyPageState extends State<LobbyPage> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.transparent,
-        title: const Text('1v1 Versus', style: TextStyle(color: _textColor)),
+        title: const Text(
+          '1v1 Versus',
+          style: TextStyle(color: TetrisColors.text),
+        ),
       ),
       body: SafeArea(
         child: Center(
@@ -176,38 +176,26 @@ class _LobbyPageState extends State<LobbyPage> {
       mainAxisAlignment: MainAxisAlignment.center,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        FilledButton(
+        TetrisButton(
           key: const ValueKey('lobby-create'),
-          style: FilledButton.styleFrom(
-            backgroundColor: _accentColor,
-            foregroundColor: const Color(0xFF07080A),
-            padding: const EdgeInsets.symmetric(vertical: 16),
-          ),
+          variant: TetrisButtonVariant.primary,
+          autofocus: true,
           onPressed: _stage == _LobbyStage.connecting ? null : _createRoom,
           child: Text(
             _stage == _LobbyStage.connecting ? 'Creating…' : 'Create match',
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
           ),
         ),
         const SizedBox(height: 28),
-        const Text(
-          'OR JOIN A FRIEND',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: _mutedTextColor,
-            fontSize: 11,
-            letterSpacing: 1.4,
-          ),
-        ),
-        const SizedBox(height: 12),
-        TextField(
+        const Center(child: TetrisSectionHeader('OR JOIN A FRIEND')),
+        const SizedBox(height: 4),
+        TetrisTextField(
           key: const ValueKey('lobby-code-field'),
           controller: _codeController,
           textCapitalization: TextCapitalization.characters,
           textAlign: TextAlign.center,
           maxLength: 5,
           style: const TextStyle(
-            color: _textColor,
+            color: TetrisColors.text,
             fontSize: 24,
             letterSpacing: 8,
             fontWeight: FontWeight.w700,
@@ -215,32 +203,16 @@ class _LobbyPageState extends State<LobbyPage> {
           inputFormatters: [
             FilteringTextInputFormatter.allow(RegExp('[a-zA-Z0-9]')),
           ],
-          decoration: InputDecoration(
-            counterText: '',
-            hintText: 'CODE',
-            hintStyle: TextStyle(
-              color: _mutedTextColor.withValues(alpha: 0.4),
-              letterSpacing: 8,
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: Color(0x33FFFFFF)),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: _accentColor),
-            ),
+          hint: 'CODE',
+          hintStyle: TextStyle(
+            color: TetrisColors.mutedText.withValues(alpha: 0.4),
+            letterSpacing: 8,
           ),
           onSubmitted: (_) => _joinRoom(),
         ),
         const SizedBox(height: 12),
-        OutlinedButton(
+        TetrisButton(
           key: const ValueKey('lobby-join'),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: _textColor,
-            side: const BorderSide(color: Color(0x33FFFFFF)),
-            padding: const EdgeInsets.symmetric(vertical: 14),
-          ),
           onPressed: _joinRoom,
           child: const Text('Join'),
         ),
@@ -250,7 +222,7 @@ class _LobbyPageState extends State<LobbyPage> {
             child: Text(
               _error!,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: _errorColor, fontSize: 13),
+              style: const TextStyle(color: TetrisColors.danger, fontSize: 13),
             ),
           ),
       ],
@@ -261,20 +233,12 @@ class _LobbyPageState extends State<LobbyPage> {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        const Text(
-          'ROOM CODE',
-          style: TextStyle(
-            color: _mutedTextColor,
-            fontSize: 11,
-            letterSpacing: 1.4,
-          ),
-        ),
-        const SizedBox(height: 8),
+        const TetrisSectionHeader('ROOM CODE'),
         SelectableText(
           _roomCode ?? '',
           key: const ValueKey('lobby-room-code'),
           style: const TextStyle(
-            color: _textColor,
+            color: TetrisColors.text,
             fontSize: 42,
             letterSpacing: 12,
             fontWeight: FontWeight.w800,
@@ -286,16 +250,17 @@ class _LobbyPageState extends State<LobbyPage> {
           height: 22,
           child: CircularProgressIndicator(
             strokeWidth: 2.4,
-            color: _accentColor,
+            color: TetrisColors.accent,
           ),
         ),
         const SizedBox(height: 14),
         const Text(
           'Waiting for your opponent…',
-          style: TextStyle(color: _mutedTextColor, fontSize: 13),
+          style: TextStyle(color: TetrisColors.mutedText, fontSize: 13),
         ),
         const SizedBox(height: 30),
-        TextButton(
+        TetrisButton(
+          variant: TetrisButtonVariant.ghost,
           onPressed: () => Navigator.of(context).maybePop(),
           child: const Text('Cancel'),
         ),

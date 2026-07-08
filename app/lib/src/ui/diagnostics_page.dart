@@ -6,14 +6,9 @@ import 'package:http/http.dart' as http;
 import '../input/gamepad_service.dart';
 import '../net/net_config.dart';
 import '../net/rtc_session.dart';
+import 'components.dart';
 import 'controls_page.dart';
-
-const _textColor = Color(0xFFF3F6FA);
-const _mutedTextColor = Color(0xFFA5ADBA);
-const _accentColor = Color(0xFF44D7FF);
-const _okColor = Color(0xFF58D957);
-const _errorColor = Color(0xFFFF4D5E);
-const _panelColor = Color(0xFF1B1D22);
+import 'theme.dart';
 
 /// Connectivity diagnostics: is the backend reachable, and is direct P2P
 /// likely to work from this network? Also shows the live match transport
@@ -109,41 +104,36 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
         backgroundColor: Colors.transparent,
         title: const Text(
           'Settings & Diagnostics',
-          style: TextStyle(color: _textColor, fontSize: 17),
+          style: TextStyle(color: TetrisColors.text, fontSize: 17),
         ),
       ),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            const _SectionHeader('CONTROLS'),
-            Card(
-              color: _panelColor,
-              margin: const EdgeInsets.only(bottom: 8),
-              child: ListTile(
-                key: const ValueKey('open-controls'),
-                leading: const Icon(Icons.sports_esports, color: _accentColor),
-                title: const Text(
-                  'Controller & touch bindings',
-                  style: TextStyle(color: _textColor, fontSize: 14),
-                ),
-                subtitle: const Text(
-                  'Xbox / PlayStation gamepads and touch gestures',
-                  style: TextStyle(color: _mutedTextColor, fontSize: 12),
-                ),
-                trailing: const Icon(
-                  Icons.chevron_right,
-                  color: _mutedTextColor,
-                ),
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => ControlsPage(gamepad: widget.gamepad),
-                  ),
+            const TetrisSectionHeader('CONTROLS'),
+            TetrisListTile(
+              key: const ValueKey('open-controls'),
+              leading: const Icon(
+                Icons.sports_esports,
+                color: TetrisColors.accent,
+              ),
+              title: const Text('Controller & touch bindings'),
+              subtitle: const Text(
+                'Xbox / PlayStation gamepads and touch gestures',
+              ),
+              trailing: const Icon(
+                Icons.chevron_right,
+                color: TetrisColors.mutedText,
+              ),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => ControlsPage(gamepad: widget.gamepad),
                 ),
               ),
             ),
             const SizedBox(height: 20),
-            const _SectionHeader('CONNECTIVITY'),
+            const TetrisSectionHeader('CONNECTIVITY'),
             _DiagnosticTile(
               title: 'Matchmaking backend',
               subtitle: '$backendBaseUrl\n$_backendDetail',
@@ -152,7 +142,7 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
             ),
             ..._buildP2pSection(),
             const SizedBox(height: 20),
-            const _SectionHeader('ABOUT'),
+            const TetrisSectionHeader('ABOUT'),
             const _InfoTile(
               title: 'Transport strategy',
               body:
@@ -179,28 +169,6 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
   }
 }
 
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader(this.title);
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8, left: 4),
-      child: Text(
-        title,
-        style: const TextStyle(
-          color: _mutedTextColor,
-          fontSize: 11,
-          letterSpacing: 1.4,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
-}
-
 class _DiagnosticTile extends StatelessWidget {
   const _DiagnosticTile({
     required this.title,
@@ -217,29 +185,21 @@ class _DiagnosticTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (icon, color) = switch (state) {
-      _ProbeState.ok => (Icons.check_circle, _okColor),
-      _ProbeState.failed => (Icons.error, _errorColor),
-      _ProbeState.running => (Icons.sync, _accentColor),
-      _ProbeState.idle => (Icons.circle_outlined, _mutedTextColor),
+      _ProbeState.ok => (Icons.check_circle, TetrisColors.ok),
+      _ProbeState.failed => (Icons.error, TetrisColors.danger),
+      _ProbeState.running => (Icons.sync, TetrisColors.accent),
+      _ProbeState.idle => (Icons.circle_outlined, TetrisColors.mutedText),
     };
-    return Card(
-      color: _panelColor,
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        leading: Icon(icon, color: color),
-        title: Text(
-          title,
-          style: const TextStyle(color: _textColor, fontSize: 14),
-        ),
-        subtitle: Text(
-          subtitle,
-          style: const TextStyle(color: _mutedTextColor, fontSize: 12),
-        ),
-        trailing: IconButton(
-          icon: const Icon(Icons.refresh, color: _mutedTextColor),
-          onPressed: state == _ProbeState.running ? null : onRetry,
-        ),
-        isThreeLine: subtitle.contains('\n'),
+    return TetrisListTile(
+      leading: Icon(icon, color: color),
+      title: Text(title),
+      subtitle: Text(subtitle),
+      trailing: TetrisIconButton(
+        icon: Icons.refresh,
+        size: 38,
+        color: TetrisColors.mutedText,
+        tooltip: 'Re-run check',
+        onPressed: state == _ProbeState.running ? null : onRetry,
       ),
     );
   }
@@ -253,29 +213,25 @@ class _InfoTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      color: _panelColor,
+    return TetrisPanel(
       margin: const EdgeInsets.only(bottom: 8),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              title,
-              style: const TextStyle(color: _textColor, fontSize: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(color: TetrisColors.text, fontSize: 14),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            body,
+            style: const TextStyle(
+              color: TetrisColors.mutedText,
+              fontSize: 12,
+              height: 1.4,
             ),
-            const SizedBox(height: 6),
-            Text(
-              body,
-              style: const TextStyle(
-                color: _mutedTextColor,
-                fontSize: 12,
-                height: 1.4,
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

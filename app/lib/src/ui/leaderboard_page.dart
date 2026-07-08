@@ -4,12 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../net/leaderboard_client.dart';
-
-const _textColor = Color(0xFFF3F6FA);
-const _mutedTextColor = Color(0xFFA5ADBA);
-const _accentColor = Color(0xFF44D7FF);
-const _errorColor = Color(0xFFFF4D5E);
-const _panelColor = Color(0xFF1B1D22);
+import 'components.dart';
+import 'theme.dart';
 
 const tetrisPlayerNamePreferenceKey = 'tetris.playerName';
 const _highScorePreferenceKey = 'tetris.highScore';
@@ -118,12 +114,18 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
         backgroundColor: Colors.transparent,
         title: const Text(
           'Global Leaderboard',
-          style: TextStyle(color: _textColor, fontSize: 17),
+          style: TextStyle(color: TetrisColors.text, fontSize: 17),
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh, color: _mutedTextColor),
-            onPressed: _refresh,
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: TetrisIconButton(
+              icon: Icons.refresh,
+              size: 40,
+              tooltip: 'Refresh',
+              color: TetrisColors.mutedText,
+              onPressed: _refresh,
+            ),
           ),
         ],
       ),
@@ -133,45 +135,25 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
-                    child: TextField(
+                    child: TetrisTextField(
                       controller: _nameController,
                       maxLength: 16,
-                      style: const TextStyle(color: _textColor),
-                      decoration: InputDecoration(
-                        counterText: '',
-                        labelText: 'Display name',
-                        labelStyle: const TextStyle(color: _mutedTextColor),
-                        helperText:
-                            'Scores submit automatically on game over',
-                        helperStyle: const TextStyle(
-                          color: _mutedTextColor,
-                          fontSize: 11,
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide:
-                              const BorderSide(color: Color(0x33FFFFFF)),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: const BorderSide(color: _accentColor),
-                        ),
-                      ),
+                      label: 'Display name',
+                      helper: 'Scores submit automatically on game over',
                       onChanged: (value) => unawaited(_saveName(value)),
                     ),
                   ),
                   const SizedBox(width: 10),
-                  FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: _accentColor,
-                      foregroundColor: const Color(0xFF07080A),
-                    ),
-                    onPressed: _submittingBest ? null : _submitBest,
-                    child: Text(
-                      _submittingBest ? '…' : 'Submit best',
-                      style: const TextStyle(fontSize: 12),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: TetrisButton(
+                      variant: TetrisButtonVariant.primary,
+                      compact: true,
+                      onPressed: _submittingBest ? null : _submitBest,
+                      child: Text(_submittingBest ? '…' : 'Submit best'),
                     ),
                   ),
                 ],
@@ -183,7 +165,9 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
                 builder: (context, snapshot) {
                   if (snapshot.connectionState != ConnectionState.done) {
                     return const Center(
-                      child: CircularProgressIndicator(color: _accentColor),
+                      child: CircularProgressIndicator(
+                        color: TetrisColors.accent,
+                      ),
                     );
                   }
                   if (snapshot.hasError) {
@@ -194,7 +178,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
                           'Could not load the leaderboard.\n${snapshot.error}',
                           textAlign: TextAlign.center,
                           style: const TextStyle(
-                            color: _errorColor,
+                            color: TetrisColors.danger,
                             fontSize: 13,
                           ),
                         ),
@@ -206,55 +190,75 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
                     return const Center(
                       child: Text(
                         'No scores yet — be the first!',
-                        style: TextStyle(color: _mutedTextColor),
+                        style: TextStyle(color: TetrisColors.mutedText),
                       ),
                     );
                   }
                   final myName = _nameController.text.trim();
                   return ListView.builder(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 6,
+                    ),
                     itemCount: entries.length,
                     itemBuilder: (context, index) {
                       final entry = entries[index];
-                      final isMe =
-                          myName.isNotEmpty && entry.name == myName;
-                      return Card(
-                        color: isMe
-                            ? _accentColor.withValues(alpha: 0.14)
-                            : _panelColor,
-                        margin: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 3,
-                        ),
-                        child: ListTile(
-                          dense: true,
-                          leading: Text(
-                            '#${index + 1}',
-                            style: TextStyle(
-                              color: index < 3 ? _accentColor : _mutedTextColor,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                              fontFeatures: const [
-                                FontFeature.tabularFigures(),
-                              ],
-                            ),
+                      final isMe = myName.isNotEmpty && entry.name == myName;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: TetrisPanel(
+                          color: isMe
+                              ? Color.lerp(
+                                  TetrisColors.panel,
+                                  TetrisColors.accent,
+                                  0.14,
+                                )!
+                              : TetrisColors.panel,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 10,
                           ),
-                          title: Text(
-                            entry.name,
-                            style: TextStyle(
-                              color: _textColor,
-                              fontSize: 14,
-                              fontWeight:
-                                  isMe ? FontWeight.w700 : FontWeight.w400,
-                            ),
-                          ),
-                          trailing: Text(
-                            '${entry.score}',
-                            style: const TextStyle(
-                              color: _textColor,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              fontFeatures: [FontFeature.tabularFigures()],
-                            ),
+                          child: Row(
+                            children: [
+                              SizedBox(
+                                width: 40,
+                                child: Text(
+                                  '#${index + 1}',
+                                  style: TextStyle(
+                                    color: index < 3
+                                        ? TetrisColors.accent
+                                        : TetrisColors.mutedText,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                    fontFeatures: const [
+                                      FontFeature.tabularFigures(),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                child: Text(
+                                  entry.name,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: TetrisColors.text,
+                                    fontSize: 14,
+                                    fontWeight: isMe
+                                        ? FontWeight.w700
+                                        : FontWeight.w400,
+                                  ),
+                                ),
+                              ),
+                              Text(
+                                '${entry.score}',
+                                style: const TextStyle(
+                                  color: TetrisColors.text,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  fontFeatures: [FontFeature.tabularFigures()],
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       );

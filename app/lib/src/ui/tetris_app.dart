@@ -19,16 +19,19 @@ import '../net/leaderboard_client.dart';
 import '../net/versus_session.dart';
 import '../platform_support.dart';
 import 'board_painting.dart';
+import 'components.dart';
 import 'home_page.dart';
 import 'leaderboard_page.dart';
+import 'theme.dart';
+import 'ui_sounds.dart';
 import 'versus_widgets.dart';
 
-const _boardBack = Color(0xFF07080A);
+const _boardBack = TetrisColors.background;
 const _background = _boardBack;
-const _panel = Color(0xFF1B1D22);
-const _text = Color(0xFFF3F6FA);
-const _mutedText = Color(0xFFA5ADBA);
-const _gridLine = Color(0x12FFFFFF);
+const _panel = TetrisColors.panel;
+const _text = TetrisColors.text;
+const _mutedText = TetrisColors.mutedText;
+const _gridLine = TetrisColors.gridLine;
 const _bufferSliverRows = 0.25;
 const _compactTopBarHeight = 54.0;
 const _maxTickDelta = Duration(milliseconds: 250);
@@ -63,7 +66,7 @@ const _defaultMusicVolume = 0.3;
 const _defaultSfxVolume = 2.0;
 const _maxSfxVolume = 2.0;
 const _musicVolumePreferenceKey = 'tetris.musicVolume';
-const _sfxVolumePreferenceKey = 'tetris.sfxVolume';
+const _sfxVolumePreferenceKey = tetrisSfxVolumePreferenceKey;
 @visibleForTesting
 const tetrisHighScorePreferenceKey = 'tetris.highScore';
 @visibleForTesting
@@ -891,6 +894,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
         }
         if (sfxVolume != null) {
           _sfxVolume = sfxVolume.clamp(0.0, _maxSfxVolume).toDouble();
+          UiFeedback.setFromStoredSfxVolume(_sfxVolume);
         }
         // Only adopt a disk snapshot when the host did not inject a specific
         // game (production always uses the internal game; tests can override)
@@ -1217,6 +1221,8 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     setState(() {
       _sfxVolume = nextVolume;
     });
+    // Menu sounds follow the same slider.
+    UiFeedback.setFromStoredSfxVolume(nextVolume);
     unawaited(_saveVolumePreference(_sfxVolumePreferenceKey, nextVolume));
   }
 
@@ -2463,17 +2469,12 @@ class _ControlButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: SizedBox.square(
-        dimension: size,
-        child: IconButton.filledTonal(
-          visualDensity: VisualDensity.compact,
-          icon: Icon(icon),
-          autofocus: autofocus,
-          onPressed: onPressed,
-        ),
-      ),
+    return TetrisIconButton(
+      icon: icon,
+      tooltip: tooltip,
+      autofocus: autofocus,
+      size: size,
+      onPressed: onPressed,
     );
   }
 }

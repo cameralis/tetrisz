@@ -5,12 +5,14 @@ import '../net/match_transport.dart';
 import '../net/protocol.dart';
 import '../net/versus_session.dart';
 import 'board_painting.dart';
+import 'components.dart';
+import 'theme.dart';
 
-const _panelColor = Color(0xFF1B1D22);
-const _textColor = Color(0xFFF3F6FA);
-const _mutedTextColor = Color(0xFFA5ADBA);
-const _accentColor = Color(0xFF44D7FF);
-const _garbageColor = Color(0xFFFF4D5E);
+const _panelColor = TetrisColors.panel;
+const _textColor = TetrisColors.text;
+const _mutedTextColor = TetrisColors.mutedText;
+const _accentColor = TetrisColors.accent;
+const _garbageColor = TetrisColors.danger;
 
 /// Live mirror of the opponent's board, fed by throttled snapshots.
 class OpponentBoardView extends StatelessWidget {
@@ -346,7 +348,8 @@ class VersusResultOverlay extends StatelessWidget {
                     ValueListenableBuilder<bool>(
                       valueListenable: session.localWantsRematch,
                       builder: (context, waiting, _) {
-                        return FilledButton(
+                        return TetrisButton(
+                          variant: TetrisButtonVariant.primary,
                           // Pre-focused so a controller can confirm instantly.
                           autofocus: true,
                           onPressed: waiting ? null : session.requestRematch,
@@ -375,7 +378,8 @@ class VersusResultOverlay extends StatelessWidget {
                       },
                     ),
                   ],
-                  TextButton(
+                  TetrisButton(
+                    variant: TetrisButtonVariant.ghost,
                     onPressed: onLeave,
                     child: const Text('Leave match'),
                   ),

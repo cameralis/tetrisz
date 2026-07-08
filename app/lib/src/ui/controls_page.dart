@@ -8,11 +8,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../input/control_bindings.dart';
 import '../input/gamepad_service.dart';
 import '../platform_support.dart';
-
-const _textColor = Color(0xFFF3F6FA);
-const _mutedTextColor = Color(0xFFA5ADBA);
-const _accentColor = Color(0xFF44D7FF);
-const _panelColor = Color(0xFF1B1D22);
+import 'components.dart';
+import 'theme.dart';
 
 /// Rebinding screen for gamepad buttons and touch gestures. Gamepad rows
 /// capture the next physical press; touch rows pick an action from a list.
@@ -203,14 +200,14 @@ class _ControlsPageState extends State<ControlsPage> {
         backgroundColor: Colors.transparent,
         title: const Text(
           'Controls',
-          style: TextStyle(color: _textColor, fontSize: 17),
+          style: TextStyle(color: TetrisColors.text, fontSize: 17),
         ),
       ),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            const _SectionHeader('CONTROLLER'),
+            const TetrisSectionHeader('CONTROLLER'),
             _buildControllerStatusTile(),
             for (final action in GameAction.values)
               _GamepadActionTile(
@@ -227,7 +224,7 @@ class _ControlsPageState extends State<ControlsPage> {
             ),
             if (isDesktopPlatform) ...[
               const SizedBox(height: 20),
-              const _SectionHeader('KEYBOARD'),
+              const TetrisSectionHeader('KEYBOARD'),
               for (final action in GameAction.values)
                 _KeyboardActionTile(
                   action: action,
@@ -242,7 +239,7 @@ class _ControlsPageState extends State<ControlsPage> {
               ),
             ],
             const SizedBox(height: 20),
-            const _SectionHeader('TOUCH'),
+            const TetrisSectionHeader('TOUCH'),
             for (final gesture in TouchGesture.values)
               _TouchGestureTile(
                 gesture: gesture,
@@ -268,32 +265,28 @@ class _ControlsPageState extends State<ControlsPage> {
 
   Widget _buildControllerStatusTile() {
     final names = _connected.map((pad) => pad.name).join(', ');
-    return Card(
-      color: _panelColor,
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        leading: Icon(
-          Icons.sports_esports,
-          color: _connected.isEmpty ? _mutedTextColor : _accentColor,
-        ),
-        title: Text(
-          _connected.isEmpty ? 'No controller detected' : names,
-          style: const TextStyle(color: _textColor, fontSize: 14),
-        ),
-        subtitle: Text(
-          widget.gamepad == null
-              ? 'Controller support is unavailable here.'
-              : 'Xbox and PlayStation controllers work over Bluetooth or '
-                    'USB. Tap an action below, then press the button to bind.',
-          style: const TextStyle(color: _mutedTextColor, fontSize: 12),
-        ),
-        trailing: IconButton(
-          icon: const Icon(Icons.refresh, color: _mutedTextColor),
-          onPressed: widget.gamepad == null
-              ? null
-              : () => unawaited(_refreshConnected()),
-        ),
-        isThreeLine: true,
+    return TetrisListTile(
+      leading: Icon(
+        Icons.sports_esports,
+        color: _connected.isEmpty
+            ? TetrisColors.mutedText
+            : TetrisColors.accent,
+      ),
+      title: Text(_connected.isEmpty ? 'No controller detected' : names),
+      subtitle: Text(
+        widget.gamepad == null
+            ? 'Controller support is unavailable here.'
+            : 'Xbox and PlayStation controllers work over Bluetooth or '
+                  'USB. Tap an action below, then press the button to bind.',
+      ),
+      trailing: TetrisIconButton(
+        icon: Icons.refresh,
+        size: 38,
+        color: TetrisColors.mutedText,
+        tooltip: 'Rescan controllers',
+        onPressed: widget.gamepad == null
+            ? null
+            : () => unawaited(_refreshConnected()),
       ),
     );
   }
@@ -337,17 +330,19 @@ class _BindingCaptureDialogState extends State<_BindingCaptureDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      backgroundColor: _panelColor,
+      backgroundColor: TetrisColors.panel,
       title: Text(
         'Bind ${widget.action.label}',
-        style: const TextStyle(color: _textColor, fontSize: 16),
+        style: const TextStyle(color: TetrisColors.text, fontSize: 16),
       ),
       content: const Text(
         'Press a button, direction, or stick on your controller…',
-        style: TextStyle(color: _mutedTextColor, fontSize: 13),
+        style: TextStyle(color: TetrisColors.mutedText, fontSize: 13),
       ),
       actions: [
-        TextButton(
+        TetrisButton(
+          variant: TetrisButtonVariant.ghost,
+          compact: true,
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Cancel'),
         ),
@@ -373,47 +368,37 @@ class _GamepadActionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      color: _panelColor,
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        key: ValueKey('gamepad-action-${action.name}'),
-        onTap: captureEnabled ? onCapture : null,
-        title: Text(
-          action.label,
-          style: const TextStyle(color: _textColor, fontSize: 14),
-        ),
-        subtitle: controls.isEmpty
-            ? const Text(
-                'Not bound',
-                style: TextStyle(color: _mutedTextColor, fontSize: 12),
-              )
-            : Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    for (final control in controls)
-                      InputChip(
-                        key: ValueKey('binding-${action.name}-${control.name}'),
-                        label: Text(control.label),
-                        labelStyle: const TextStyle(
-                          color: _textColor,
-                          fontSize: 11,
-                        ),
-                        backgroundColor: const Color(0xFF272A31),
-                        side: const BorderSide(color: Color(0x22FFFFFF)),
-                        deleteIconColor: _mutedTextColor,
-                        onDeleted: () => onUnbind(control),
+    return TetrisListTile(
+      key: ValueKey('gamepad-action-${action.name}'),
+      onTap: captureEnabled ? onCapture : null,
+      title: Text(action.label),
+      subtitle: controls.isEmpty
+          ? const Text('Not bound')
+          : Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final control in controls)
+                    InputChip(
+                      key: ValueKey('binding-${action.name}-${control.name}'),
+                      label: Text(control.label),
+                      labelStyle: const TextStyle(
+                        color: TetrisColors.text,
+                        fontSize: 11,
                       ),
-                  ],
-                ),
+                      backgroundColor: TetrisColors.panelRaised,
+                      side: const BorderSide(color: Color(0x22FFFFFF)),
+                      deleteIconColor: TetrisColors.mutedText,
+                      onDeleted: () => onUnbind(control),
+                    ),
+                ],
               ),
-        trailing: Icon(
-          Icons.add_circle_outline,
-          color: captureEnabled ? _accentColor : _mutedTextColor,
-        ),
+            ),
+      trailing: Icon(
+        Icons.add_circle_outline,
+        color: captureEnabled ? TetrisColors.accent : TetrisColors.mutedText,
       ),
     );
   }
@@ -444,17 +429,19 @@ class _KeyboardBindingCaptureDialog extends StatelessWidget {
         return KeyEventResult.handled;
       },
       child: AlertDialog(
-        backgroundColor: _panelColor,
+        backgroundColor: TetrisColors.panel,
         title: Text(
           'Bind ${action.label}',
-          style: const TextStyle(color: _textColor, fontSize: 16),
+          style: const TextStyle(color: TetrisColors.text, fontSize: 16),
         ),
         content: const Text(
           'Press any key to bind it. Esc cancels.',
-          style: TextStyle(color: _mutedTextColor, fontSize: 13),
+          style: TextStyle(color: TetrisColors.mutedText, fontSize: 13),
         ),
         actions: [
-          TextButton(
+          TetrisButton(
+            variant: TetrisButtonVariant.ghost,
+            compact: true,
             onPressed: () => Navigator.of(context).pop(),
             child: const Text('Cancel'),
           ),
@@ -479,46 +466,39 @@ class _KeyboardActionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      color: _panelColor,
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        key: ValueKey('keyboard-action-${action.name}'),
-        onTap: onCapture,
-        title: Text(
-          action.label,
-          style: const TextStyle(color: _textColor, fontSize: 14),
-        ),
-        subtitle: keys.isEmpty
-            ? const Text(
-                'Not bound',
-                style: TextStyle(color: _mutedTextColor, fontSize: 12),
-              )
-            : Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    for (final key in keys)
-                      InputChip(
-                        key: ValueKey(
-                          'key-binding-${action.name}-${key.keyId}',
-                        ),
-                        label: Text(describeLogicalKey(key)),
-                        labelStyle: const TextStyle(
-                          color: _textColor,
-                          fontSize: 11,
-                        ),
-                        backgroundColor: const Color(0xFF272A31),
-                        side: const BorderSide(color: Color(0x22FFFFFF)),
-                        deleteIconColor: _mutedTextColor,
-                        onDeleted: () => onUnbind(key),
+    return TetrisListTile(
+      key: ValueKey('keyboard-action-${action.name}'),
+      onTap: onCapture,
+      title: Text(action.label),
+      subtitle: keys.isEmpty
+          ? const Text('Not bound')
+          : Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final key in keys)
+                    InputChip(
+                      key: ValueKey(
+                        'key-binding-${action.name}-${key.keyId}',
                       ),
-                  ],
-                ),
+                      label: Text(describeLogicalKey(key)),
+                      labelStyle: const TextStyle(
+                        color: TetrisColors.text,
+                        fontSize: 11,
+                      ),
+                      backgroundColor: TetrisColors.panelRaised,
+                      side: const BorderSide(color: Color(0x22FFFFFF)),
+                      deleteIconColor: TetrisColors.mutedText,
+                      onDeleted: () => onUnbind(key),
+                    ),
+                ],
               ),
-        trailing: const Icon(Icons.add_circle_outline, color: _accentColor),
+            ),
+      trailing: const Icon(
+        Icons.add_circle_outline,
+        color: TetrisColors.accent,
       ),
     );
   }
@@ -537,46 +517,43 @@ class _TouchGestureTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      color: _panelColor,
+    return TetrisPanel(
       margin: const EdgeInsets.only(bottom: 8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                gesture.label,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: _textColor, fontSize: 14),
-              ),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              gesture.label,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: TetrisColors.text, fontSize: 14),
             ),
-            DropdownButton<GameAction?>(
-              key: ValueKey('touch-gesture-${gesture.name}'),
-              value: action,
-              hint: const Text(
-                'None',
-                style: TextStyle(color: _mutedTextColor, fontSize: 13),
+          ),
+          DropdownButton<GameAction?>(
+            key: ValueKey('touch-gesture-${gesture.name}'),
+            value: action,
+            hint: const Text(
+              'None',
+              style: TextStyle(color: TetrisColors.mutedText, fontSize: 13),
+            ),
+            dropdownColor: TetrisColors.panel,
+            style: const TextStyle(color: TetrisColors.text, fontSize: 13),
+            underline: const SizedBox.shrink(),
+            isDense: true,
+            items: [
+              const DropdownMenuItem<GameAction?>(
+                value: null,
+                child: Text('None'),
               ),
-              dropdownColor: _panelColor,
-              style: const TextStyle(color: _textColor, fontSize: 13),
-              underline: const SizedBox.shrink(),
-              isDense: true,
-              items: [
-                const DropdownMenuItem<GameAction?>(
-                  value: null,
-                  child: Text('None'),
+              for (final candidate in GameAction.values)
+                DropdownMenuItem<GameAction?>(
+                  value: candidate,
+                  child: Text(candidate.label),
                 ),
-                for (final candidate in GameAction.values)
-                  DropdownMenuItem<GameAction?>(
-                    value: candidate,
-                    child: Text(candidate.label),
-                  ),
-              ],
-              onChanged: onChanged,
-            ),
-          ],
-        ),
+            ],
+            onChanged: onChanged,
+          ),
+        ],
       ),
     );
   }
@@ -592,11 +569,12 @@ class _ResetButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return Align(
       alignment: Alignment.centerLeft,
-      child: TextButton.icon(
+      child: TetrisButton(
+        variant: TetrisButtonVariant.ghost,
+        compact: true,
+        icon: Icons.settings_backup_restore,
         onPressed: onPressed,
-        icon: const Icon(Icons.settings_backup_restore, size: 18),
-        label: Text(label),
-        style: TextButton.styleFrom(foregroundColor: _accentColor),
+        child: Text(label),
       ),
     );
   }
@@ -614,31 +592,9 @@ class _FootnoteTile extends StatelessWidget {
       child: Text(
         text,
         style: const TextStyle(
-          color: _mutedTextColor,
+          color: TetrisColors.mutedText,
           fontSize: 12,
           height: 1.4,
-        ),
-      ),
-    );
-  }
-}
-
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader(this.title);
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8, left: 4),
-      child: Text(
-        title,
-        style: const TextStyle(
-          color: _mutedTextColor,
-          fontSize: 11,
-          letterSpacing: 1.4,
-          fontWeight: FontWeight.w600,
         ),
       ),
     );
