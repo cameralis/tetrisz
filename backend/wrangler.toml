@@ -14,6 +14,10 @@ class_name = "LeaderboardDO"
 name = "PLAYERS"
 class_name = "PlayersDO"
 
+[[durable_objects.bindings]]
+name = "PRESENCE"
+class_name = "PresenceDO"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["RoomDO"]
@@ -25,6 +29,10 @@ new_sqlite_classes = ["LeaderboardDO"]
 [[migrations]]
 tag = "v3"
 new_sqlite_classes = ["PlayersDO"]
+
+[[migrations]]
+tag = "v4"
+new_sqlite_classes = ["PresenceDO"]
 
 [vars]
 # Set to the real Firebase project id once the project exists (see

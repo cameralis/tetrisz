@@ -17,9 +17,12 @@ import '../input/gamepad_service.dart';
 import '../input/gamepad_ui_navigator.dart';
 import '../auth/auth_service.dart';
 import '../net/leaderboard_client.dart';
+import '../net/presence_client.dart';
 import '../net/protocol.dart';
 import '../net/rankings_client.dart';
+import '../net/room_client.dart';
 import '../net/versus_session.dart';
+import 'lobby_page.dart';
 import '../platform_support.dart';
 import 'board_painting.dart';
 import 'components.dart';
@@ -370,6 +373,7 @@ class TetrisApp extends StatefulWidget {
     this.soundEffects,
     this.haptics,
     this.gamepad,
+    this.createInviteRoom,
   });
 
   final bool enableAudio;
@@ -382,12 +386,155 @@ class TetrisApp extends StatefulWidget {
   /// must not touch the platform event channel).
   final GamepadService? gamepad;
 
+  /// Test seam for the room created when accepting a friend invite.
+  final Future<RoomChannel> Function()? createInviteRoom;
+
   @override
   State<TetrisApp> createState() => _TetrisAppState();
 }
 
 class _TetrisAppState extends State<TetrisApp> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+  StreamSubscription<PresenceEvent>? _presenceSubscription;
+  bool _inviteDialogOpen = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _presenceSubscription = PresenceHub.instance?.events.listen(
+      _onPresenceEvent,
+    );
+  }
+
+  @override
+  void dispose() {
+    unawaited(_presenceSubscription?.cancel() ?? Future.value());
+    super.dispose();
+  }
+
+  void _onPresenceEvent(PresenceEvent event) {
+    final hub = PresenceHub.instance;
+    if (hub == null) {
+      return;
+    }
+    switch (event) {
+      case InviteReceived(:final fromUid):
+        // Mid-match players are busy; decline without interrupting.
+        if (hub.status == FriendPresence.versus || _inviteDialogOpen) {
+          hub.respondInvite(toUid: fromUid, accept: false);
+          return;
+        }
+        unawaited(_promptInvite(fromUid));
+      case InviteAccepted(:final roomCode):
+        TetrisToastHost.show(
+          'Challenge accepted — joining the room!',
+          icon: Icons.sports_esports_rounded,
+          accent: TetrisColors.ok,
+        );
+        _navigatorKey.currentState?.push(
+          MaterialPageRoute<void>(
+            builder: (_) => LobbyPage(
+              enableAudio: widget.enableAudio,
+              musicPlayer: widget.musicPlayer,
+              soundEffects: widget.soundEffects,
+              haptics: widget.haptics,
+              gamepad: widget.gamepad,
+              initialJoinCode: roomCode,
+            ),
+          ),
+        );
+      case InviteDeclined():
+        TetrisToastHost.show(
+          'Your challenge was declined.',
+          icon: Icons.person_off_rounded,
+        );
+      case InviteFailed():
+        TetrisToastHost.show(
+          'That friend is not online right now.',
+          icon: Icons.info_outline_rounded,
+        );
+    }
+  }
+
+  Future<void> _promptInvite(String fromUid) async {
+    final hub = PresenceHub.instance;
+    final navigatorContext = _navigatorKey.currentContext;
+    if (hub == null || navigatorContext == null) {
+      return;
+    }
+    _inviteDialogOpen = true;
+    UiFeedback.play(UiSfx.toast);
+    Timer? expiry;
+    final accepted = await showDialog<bool>(
+      context: navigatorContext,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        expiry = Timer(const Duration(seconds: 30), () {
+          if (Navigator.of(dialogContext).canPop()) {
+            Navigator.of(dialogContext).pop(false);
+          }
+        });
+        return AlertDialog(
+          backgroundColor: TetrisColors.panel,
+          title: const Text(
+            '1v1 challenge!',
+            style: TextStyle(color: TetrisColors.text, fontSize: 17),
+          ),
+          content: const Text(
+            'A friend is challenging you to a versus match.',
+            style: TextStyle(color: TetrisColors.mutedText, fontSize: 13),
+          ),
+          actions: [
+            TetrisButton(
+              key: const ValueKey('invite-decline'),
+              variant: TetrisButtonVariant.ghost,
+              compact: true,
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Decline'),
+            ),
+            TetrisButton(
+              key: const ValueKey('invite-accept'),
+              variant: TetrisButtonVariant.primary,
+              compact: true,
+              autofocus: true,
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Accept'),
+            ),
+          ],
+        );
+      },
+    );
+    expiry?.cancel();
+    _inviteDialogOpen = false;
+    if (accepted != true) {
+      hub.respondInvite(toUid: fromUid, accept: false);
+      return;
+    }
+    try {
+      final room = await (widget.createInviteRoom?.call() ??
+          RoomClient.create());
+      hub.respondInvite(toUid: fromUid, accept: true, roomCode: room.code);
+      _navigatorKey.currentState?.push(
+        MaterialPageRoute<void>(
+          builder: (_) => LobbyPage(
+            enableAudio: widget.enableAudio,
+            musicPlayer: widget.musicPlayer,
+            soundEffects: widget.soundEffects,
+            haptics: widget.haptics,
+            gamepad: widget.gamepad,
+            initialClient: room,
+          ),
+        ),
+      );
+    } catch (error) {
+      hub.respondInvite(toUid: fromUid, accept: false);
+      TetrisToastHost.show(
+        'Could not open a room: $error',
+        icon: Icons.error_outline_rounded,
+        accent: TetrisColors.danger,
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -581,6 +728,12 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _game = widget.game ?? widget.versusSession?.game ?? TetrisGame();
+    // Friends see whether we're in a solo round or a match.
+    PresenceHub.instance?.setStatus(
+      widget.versusSession == null
+          ? FriendPresence.solo
+          : FriendPresence.versus,
+    );
     final session = widget.versusSession;
     if (session != null) {
       _lastVersusPhase = session.phase.value;
@@ -669,6 +822,7 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       unawaited(session.dispose());
     }
     _countdownTailTimer?.cancel();
+    PresenceHub.instance?.setStatus(FriendPresence.online);
     _lineClearSnapImage?.dispose();
     _snapBackController.dispose();
     _lineClearController.dispose();

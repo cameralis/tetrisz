@@ -1,14 +1,16 @@
 import { verifyFirebaseToken } from "./auth";
 import { LeaderboardDO } from "./leaderboard";
 import { PlayersDO } from "./players";
+import { PresenceDO } from "./presence";
 import { RoomDO } from "./room";
 
-export { LeaderboardDO, PlayersDO, RoomDO };
+export { LeaderboardDO, PlayersDO, PresenceDO, RoomDO };
 
 export interface Env {
   ROOM: DurableObjectNamespace;
   LEADERBOARD: DurableObjectNamespace;
   PLAYERS: DurableObjectNamespace;
+  PRESENCE: DurableObjectNamespace;
   FIREBASE_PROJECT_ID?: string;
   TEST_JWK?: string;
 }
@@ -109,6 +111,58 @@ export default {
         return withCors(response);
       }
       return json({ error: "method_not_allowed" }, 405);
+    }
+
+    if (url.pathname === "/api/presence/ws" && request.method === "GET") {
+      // WebSockets can't set headers from Dart, so the token rides in the
+      // query string; it is verified here and only the uid crosses into the
+      // Durable Object.
+      const token = url.searchParams.get("token");
+      const user = await verifyFirebaseToken(
+        token === null ? null : `Bearer ${token}`,
+        env,
+      );
+      if (user === null) {
+        return json({ error: "unauthorized" }, 401);
+      }
+      const stub = env.PRESENCE.get(env.PRESENCE.idFromName("global"));
+      const forwarded = new Request("https://presence/ws", request);
+      forwarded.headers.set("X-Uid", user.uid);
+      return stub.fetch(forwarded);
+    }
+
+    if (url.pathname === "/api/presence/query" && request.method === "POST") {
+      const user = await verifyFirebaseToken(
+        request.headers.get("Authorization"),
+        env,
+      );
+      if (user === null) {
+        return json({ error: "unauthorized" }, 401);
+      }
+      const body = (await request.json().catch(() => ({}))) as {
+        uids?: unknown;
+      };
+      const requested = Array.isArray(body.uids)
+        ? body.uids.filter((uid): uid is string => typeof uid === "string")
+        : [];
+      // Only friends' presence is visible.
+      const players = env.PLAYERS.get(env.PLAYERS.idFromName("global"));
+      const friendsResponse = await players.fetch(
+        "https://players/friends/list",
+        { method: "POST", body: JSON.stringify({ uid: user.uid }) },
+      );
+      const friendUids = new Set(
+        (
+          (await friendsResponse.json()) as { friends: { uid: string }[] }
+        ).friends.map((friend) => friend.uid),
+      );
+      const allowed = requested.filter((uid) => friendUids.has(uid));
+      const stub = env.PRESENCE.get(env.PRESENCE.idFromName("global"));
+      const response = await stub.fetch("https://presence/query", {
+        method: "POST",
+        body: JSON.stringify({ uids: allowed }),
+      });
+      return withCors(response);
     }
 
     if (url.pathname === "/api/friends" || url.pathname === "/api/friends/remove") {

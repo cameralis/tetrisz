@@ -31,6 +31,8 @@ class LobbyPage extends StatefulWidget {
     this.createRoom,
     this.joinRoom,
     this.enableP2p = true,
+    this.initialJoinCode,
+    this.initialClient,
   });
 
   final bool enableAudio;
@@ -45,6 +47,12 @@ class LobbyPage extends StatefulWidget {
 
   /// Tests disable this so no WebRTC platform channels are touched.
   final bool enableP2p;
+
+  /// Friend-invite entry points: join this room code immediately on open…
+  final String? initialJoinCode;
+
+  /// …or adopt an already-connected room (the invite accepter created it).
+  final RoomChannel? initialClient;
 
   @override
   State<LobbyPage> createState() => _LobbyPageState();
@@ -62,6 +70,24 @@ class _LobbyPageState extends State<LobbyPage> {
   bool _handedOff = false;
   RoomChannel? _client;
   StreamSubscription<ServerEnvelope>? _subscription;
+
+  @override
+  void initState() {
+    super.initState();
+    final initialClient = widget.initialClient;
+    final initialJoinCode = widget.initialJoinCode;
+    if (initialClient != null) {
+      _adoptClient(initialClient);
+      _stage = _LobbyStage.waiting;
+      _roomCode = initialClient.code;
+    } else if (initialJoinCode != null) {
+      _stage = _LobbyStage.waiting;
+      _roomCode = initialJoinCode.toUpperCase();
+      _adoptClient(
+        widget.joinRoom?.call(_roomCode!) ?? RoomClient.join(_roomCode!),
+      );
+    }
+  }
 
   @override
   void dispose() {

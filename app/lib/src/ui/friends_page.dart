@@ -5,20 +5,32 @@ import 'package:flutter/services.dart';
 
 import '../auth/auth_service.dart';
 import '../net/friends_client.dart';
+import '../net/presence_client.dart';
 import '../net/profile_client.dart';
 import 'account_page.dart';
 import 'components.dart';
 import 'theme.dart';
 import 'toasts.dart';
 
-/// Friends list: your shareable code, add-by-code, and the mutual list.
-/// Presence and 1v1 invites arrive with the presence slice.
+const _presencePollInterval = Duration(seconds: 10);
+
+/// Friends list: your shareable code, add-by-code, live presence dots and
+/// 1v1 invites for online friends.
 class FriendsPage extends StatefulWidget {
-  const FriendsPage({super.key, this.auth, this.friendsApi, this.profileApi});
+  const FriendsPage({
+    super.key,
+    this.auth,
+    this.friendsApi,
+    this.profileApi,
+    this.presenceQuery,
+    this.presenceHub,
+  });
 
   final AuthService? auth;
   final FriendsApi? friendsApi;
   final ProfileApi? profileApi;
+  final PresenceQueryApi? presenceQuery;
+  final PresenceHub? presenceHub;
 
   @override
   State<FriendsPage> createState() => _FriendsPageState();
@@ -30,8 +42,14 @@ class _FriendsPageState extends State<FriendsPage> {
       widget.friendsApi ?? HttpFriendsApi(auth: _auth);
   late final ProfileApi _profile =
       widget.profileApi ?? HttpProfileApi(auth: _auth);
+  late final PresenceQueryApi _presence =
+      widget.presenceQuery ?? HttpPresenceQueryApi(auth: _auth);
+  PresenceHub? get _hub => widget.presenceHub ?? PresenceHub.instance;
   final _codeController = TextEditingController();
   Future<(PlayerProfile, List<Friend>)>? _dataFuture;
+  Map<String, FriendPresence> _statuses = {};
+  List<String> _friendUids = [];
+  Timer? _presenceTimer;
   bool _adding = false;
 
   @override
@@ -39,13 +57,30 @@ class _FriendsPageState extends State<FriendsPage> {
     super.initState();
     _auth.account.addListener(_reload);
     _reload();
+    _presenceTimer = Timer.periodic(
+      _presencePollInterval,
+      (_) => unawaited(_refreshPresence()),
+    );
   }
 
   @override
   void dispose() {
+    _presenceTimer?.cancel();
     _auth.account.removeListener(_reload);
     _codeController.dispose();
     super.dispose();
+  }
+
+  Future<void> _refreshPresence() async {
+    if (_friendUids.isEmpty || _auth.account.value == null) {
+      return;
+    }
+    try {
+      final statuses = await _presence.query(_friendUids);
+      if (mounted) {
+        setState(() => _statuses = statuses);
+      }
+    } catch (_) {}
   }
 
   void _reload() {
@@ -58,9 +93,26 @@ class _FriendsPageState extends State<FriendsPage> {
           : Future.wait([
               _profile.fetch(),
               _friends.list(),
-            ]).then((results) =>
-                (results[0] as PlayerProfile, results[1] as List<Friend>));
+            ]).then((results) {
+              final friends = results[1] as List<Friend>;
+              _friendUids = friends.map((friend) => friend.uid).toList();
+              unawaited(_refreshPresence());
+              return (results[0] as PlayerProfile, friends);
+            });
     });
+  }
+
+  void _invite(Friend friend) {
+    final hub = _hub;
+    if (hub == null) {
+      return;
+    }
+    hub.sendInvite(friend.uid);
+    TetrisToastHost.show(
+      'Challenge sent to ${friend.displayName}!',
+      icon: Icons.sports_esports_rounded,
+      accent: TetrisColors.accent,
+    );
   }
 
   Future<void> _addFriend() async {
@@ -266,23 +318,49 @@ class _FriendsPageState extends State<FriendsPage> {
             for (final friend in friends)
               TetrisListTile(
                 key: ValueKey('friend-${friend.uid}'),
-                leading: const Icon(
-                  // Presence dot arrives with the presence slice.
+                leading: Icon(
                   Icons.circle,
                   size: 12,
-                  color: TetrisColors.mutedText,
+                  color: switch (_statuses[friend.uid]) {
+                    FriendPresence.online => TetrisColors.ok,
+                    FriendPresence.solo => TetrisColors.accent,
+                    FriendPresence.versus => const Color(0xFFF79E45),
+                    _ => TetrisColors.mutedText,
+                  },
                 ),
                 title: Text(friend.displayName),
                 subtitle: Text(
-                  '${friend.friendCode} · rating ${friend.rating}',
+                  switch (_statuses[friend.uid]) {
+                    FriendPresence.online => 'Online',
+                    FriendPresence.solo => 'Playing solo',
+                    FriendPresence.versus => 'In a match',
+                    _ => '${friend.friendCode} · rating ${friend.rating}',
+                  },
                 ),
-                trailing: TetrisIconButton(
-                  key: ValueKey('friend-remove-${friend.uid}'),
-                  icon: Icons.person_remove_rounded,
-                  size: 36,
-                  color: TetrisColors.mutedText,
-                  tooltip: 'Remove friend',
-                  onPressed: () => unawaited(_removeFriend(friend)),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_statuses[friend.uid] == FriendPresence.online ||
+                        _statuses[friend.uid] == FriendPresence.solo)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: TetrisButton(
+                          key: ValueKey('friend-invite-${friend.uid}'),
+                          variant: TetrisButtonVariant.primary,
+                          compact: true,
+                          onPressed: () => _invite(friend),
+                          child: const Text('1v1'),
+                        ),
+                      ),
+                    TetrisIconButton(
+                      key: ValueKey('friend-remove-${friend.uid}'),
+                      icon: Icons.person_remove_rounded,
+                      size: 36,
+                      color: TetrisColors.mutedText,
+                      tooltip: 'Remove friend',
+                      onPressed: () => unawaited(_removeFriend(friend)),
+                    ),
+                  ],
                 ),
               ),
           ],
