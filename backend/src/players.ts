@@ -83,6 +83,73 @@ export class PlayersDO extends DurableObject {
       return Response.json(await this.rankings(uid));
     }
 
+    if (url.pathname === "/friends/add" && request.method === "POST") {
+      const { uid, friendCode } = (await request.json()) as {
+        uid?: string;
+        friendCode?: string;
+      };
+      if (
+        typeof uid !== "string" ||
+        uid === "" ||
+        typeof friendCode !== "string" ||
+        !/^[A-Z2-9]{6}$/.test(friendCode)
+      ) {
+        return new Response("bad request", { status: 400 });
+      }
+      const otherUid = await this.ctx.storage.get<string>(`fc:${friendCode}`);
+      if (otherUid === undefined) {
+        return Response.json({ error: "unknown_code" }, { status: 404 });
+      }
+      if (otherUid === uid) {
+        return Response.json({ error: "own_code" }, { status: 400 });
+      }
+      await this.getOrCreate(uid);
+      const mine = await this.friendSet(uid);
+      if (mine.includes(otherUid)) {
+        return Response.json({ error: "already_friends" }, { status: 409 });
+      }
+      const theirs = await this.friendSet(otherUid);
+      mine.push(otherUid);
+      theirs.push(uid);
+      await this.ctx.storage.put(`fr:${uid}`, mine);
+      await this.ctx.storage.put(`fr:${otherUid}`, theirs);
+      const profile = await this.getOrCreate(otherUid);
+      return Response.json(this.friendView(profile));
+    }
+
+    if (url.pathname === "/friends/list" && request.method === "POST") {
+      const { uid } = (await request.json()) as { uid?: string };
+      if (typeof uid !== "string" || uid === "") {
+        return new Response("bad uid", { status: 400 });
+      }
+      const friends = await this.friendSet(uid);
+      const views = [];
+      for (const friendUid of friends) {
+        views.push(this.friendView(await this.getOrCreate(friendUid)));
+      }
+      return Response.json({ friends: views });
+    }
+
+    if (url.pathname === "/friends/remove" && request.method === "POST") {
+      const { uid, otherUid } = (await request.json()) as {
+        uid?: string;
+        otherUid?: string;
+      };
+      if (
+        typeof uid !== "string" ||
+        uid === "" ||
+        typeof otherUid !== "string" ||
+        otherUid === ""
+      ) {
+        return new Response("bad request", { status: 400 });
+      }
+      const mine = (await this.friendSet(uid)).filter((f) => f !== otherUid);
+      const theirs = (await this.friendSet(otherUid)).filter((f) => f !== uid);
+      await this.ctx.storage.put(`fr:${uid}`, mine);
+      await this.ctx.storage.put(`fr:${otherUid}`, theirs);
+      return Response.json({ ok: true });
+    }
+
     if (url.pathname === "/update-name" && request.method === "POST") {
       const { uid, displayName } = (await request.json()) as {
         uid?: string;
@@ -231,6 +298,26 @@ export class PlayersDO extends DurableObject {
       }
     }
     return { entries, you };
+  }
+
+  private async friendSet(uid: string): Promise<string[]> {
+    return (await this.ctx.storage.get<string[]>(`fr:${uid}`)) ?? [];
+  }
+
+  private friendView(profile: PlayerProfile): {
+    uid: string;
+    displayName: string;
+    friendCode: string;
+    rating: number;
+    ratedGames: number;
+  } {
+    return {
+      uid: profile.uid,
+      displayName: profile.displayName === "" ? "???" : profile.displayName,
+      friendCode: profile.friendCode,
+      rating: profile.rating,
+      ratedGames: profile.ratedGames,
+    };
   }
 
   private async allocateFriendCode(uid: string): Promise<string> {

@@ -111,6 +111,51 @@ export default {
       return json({ error: "method_not_allowed" }, 405);
     }
 
+    if (url.pathname === "/api/friends" || url.pathname === "/api/friends/remove") {
+      const user = await verifyFirebaseToken(
+        request.headers.get("Authorization"),
+        env,
+      );
+      if (user === null) {
+        return json({ error: "unauthorized" }, 401);
+      }
+      const stub = env.PLAYERS.get(env.PLAYERS.idFromName("global"));
+      if (url.pathname === "/api/friends" && request.method === "GET") {
+        const response = await stub.fetch("https://players/friends/list", {
+          method: "POST",
+          body: JSON.stringify({ uid: user.uid }),
+        });
+        return withCors(response);
+      }
+      if (url.pathname === "/api/friends" && request.method === "POST") {
+        const body = (await request.json().catch(() => ({}))) as {
+          friendCode?: unknown;
+        };
+        const response = await stub.fetch("https://players/friends/add", {
+          method: "POST",
+          body: JSON.stringify({
+            uid: user.uid,
+            friendCode:
+              typeof body.friendCode === "string"
+                ? body.friendCode.toUpperCase()
+                : undefined,
+          }),
+        });
+        return withCors(response);
+      }
+      if (url.pathname === "/api/friends/remove" && request.method === "POST") {
+        const body = (await request.json().catch(() => ({}))) as {
+          uid?: unknown;
+        };
+        const response = await stub.fetch("https://players/friends/remove", {
+          method: "POST",
+          body: JSON.stringify({ uid: user.uid, otherUid: body.uid }),
+        });
+        return withCors(response);
+      }
+      return json({ error: "method_not_allowed" }, 405);
+    }
+
     if (url.pathname === "/api/versus/result" && request.method === "POST") {
       const user = await verifyFirebaseToken(
         request.headers.get("Authorization"),

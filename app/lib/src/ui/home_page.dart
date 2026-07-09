@@ -4,6 +4,7 @@ import '../input/gamepad_service.dart';
 import 'account_page.dart';
 import 'components.dart';
 import 'diagnostics_page.dart';
+import 'friends_page.dart';
 import 'leaderboard_page.dart';
 import 'lobby_page.dart';
 import 'tetris_app.dart';
@@ -190,6 +191,19 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                       const SizedBox(height: 12),
                       _staggered(
                         4,
+                        TetrisButton(
+                          key: const ValueKey('home-friends'),
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const FriendsPage(),
+                            ),
+                          ),
+                          child: const Text('Friends'),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      _staggered(
+                        5,
                         TetrisButton(
                           key: const ValueKey('home-diagnostics'),
                           variant: TetrisButtonVariant.ghost,
