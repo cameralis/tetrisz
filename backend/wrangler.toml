@@ -10,6 +10,10 @@ class_name = "RoomDO"
 name = "LEADERBOARD"
 class_name = "LeaderboardDO"
 
+[[durable_objects.bindings]]
+name = "PLAYERS"
+class_name = "PlayersDO"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["RoomDO"]
@@ -17,6 +21,15 @@ new_sqlite_classes = ["RoomDO"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["LeaderboardDO"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["PlayersDO"]
+
+[vars]
+# Set to the real Firebase project id once the project exists (see
+# docs/firebase-setup.md). Empty disables all authenticated routes.
+FIREBASE_PROJECT_ID = ""
 
 [observability]
 enabled = true

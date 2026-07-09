@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../input/gamepad_service.dart';
+import 'account_page.dart';
 import 'components.dart';
 import 'diagnostics_page.dart';
 import 'leaderboard_page.dart';
@@ -85,6 +86,26 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           RepaintBoundary(
             child: CustomPaint(
               painter: _FallingBlocksPainter(repaint: _background),
+            ),
+          ),
+          SafeArea(
+            child: Align(
+              alignment: Alignment.topRight,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: TetrisIconButton(
+                  key: const ValueKey('home-account'),
+                  icon: Icons.person_rounded,
+                  size: 40,
+                  tooltip: 'Account',
+                  color: TetrisColors.mutedText,
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const AccountPage(),
+                    ),
+                  ),
+                ),
+              ),
             ),
           ),
           SafeArea(

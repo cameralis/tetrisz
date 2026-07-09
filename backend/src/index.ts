@@ -1,11 +1,16 @@
+import { verifyFirebaseToken } from "./auth";
 import { LeaderboardDO } from "./leaderboard";
+import { PlayersDO } from "./players";
 import { RoomDO } from "./room";
 
-export { LeaderboardDO, RoomDO };
+export { LeaderboardDO, PlayersDO, RoomDO };
 
 export interface Env {
   ROOM: DurableObjectNamespace;
   LEADERBOARD: DurableObjectNamespace;
+  PLAYERS: DurableObjectNamespace;
+  FIREBASE_PROJECT_ID?: string;
+  TEST_JWK?: string;
 }
 
 // No 0/O or 1/I so codes survive being read aloud.
@@ -72,6 +77,38 @@ export default {
         });
         return withCors(response);
       }
+    }
+
+    if (url.pathname === "/api/profile") {
+      const user = await verifyFirebaseToken(
+        request.headers.get("Authorization"),
+        env,
+      );
+      if (user === null) {
+        return json({ error: "unauthorized" }, 401);
+      }
+      const stub = env.PLAYERS.get(env.PLAYERS.idFromName("global"));
+      if (request.method === "GET") {
+        const response = await stub.fetch("https://players/get-or-create", {
+          method: "POST",
+          body: JSON.stringify({ uid: user.uid }),
+        });
+        return withCors(response);
+      }
+      if (request.method === "PUT") {
+        const body = (await request.json().catch(() => ({}))) as {
+          displayName?: unknown;
+        };
+        const response = await stub.fetch("https://players/update-name", {
+          method: "POST",
+          body: JSON.stringify({
+            uid: user.uid,
+            displayName: body.displayName,
+          }),
+        });
+        return withCors(response);
+      }
+      return json({ error: "method_not_allowed" }, 405);
     }
 
     if (url.pathname === "/api/rooms" && request.method === "POST") {
