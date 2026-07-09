@@ -47,9 +47,35 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     vsync: this,
     duration: _backgroundRunTime,
   )..forward();
+  Animation<double>? _coveringRoute;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final secondary = ModalRoute.of(context)?.secondaryAnimation;
+    if (!identical(secondary, _coveringRoute)) {
+      _coveringRoute?.removeStatusListener(_onCoveringRouteStatus);
+      _coveringRoute = secondary;
+      _coveringRoute?.addStatusListener(_onCoveringRouteStatus);
+    }
+  }
+
+  /// The animation clock keeps running while a pushed page covers this one
+  /// (only the ticker is muted), so a long enough visit elsewhere brings the
+  /// bounded rain back already-completed — permanently frozen. Kick off a
+  /// fresh pass whenever the covering page finishes popping away. Always
+  /// restart rather than checking `isCompleted`: the muted controller only
+  /// jumps to its real (possibly finished) position on the first tick after
+  /// this callback, so its current value says nothing yet.
+  void _onCoveringRouteStatus(AnimationStatus status) {
+    if (status == AnimationStatus.dismissed) {
+      _background.forward(from: 0);
+    }
+  }
 
   @override
   void dispose() {
+    _coveringRoute?.removeStatusListener(_onCoveringRouteStatus);
     _entrance.dispose();
     _background.dispose();
     super.dispose();
