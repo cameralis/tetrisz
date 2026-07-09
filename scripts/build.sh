@@ -111,7 +111,18 @@ build_ipa() {
   echo "   SwiftSupport: $(ls "$stage/SwiftSupport/iphoneos" | tr '\n' ' ')"
 
   IPA_PATH="$stage/Tetris.ipa"
-  ( cd "$stage" && rm -f Tetris.ipa && zip -qry Tetris.ipa Payload SwiftSupport )
+  # Apple wants SwiftSupport to mirror the embedded swift dylibs EXACTLY:
+  # missing while dylibs are embedded -> ITMS-90426, extra dylibs ->
+  # ITMS-90429, and present-but-EMPTY -> ITMS-90424 (since iOS 15 targets
+  # embed no swift dylibs at all, the folder must be omitted entirely).
+  local zip_dirs=(Payload)
+  if [ -n "$(ls -A "$stage/SwiftSupport/iphoneos" 2>/dev/null)" ]; then
+    zip_dirs+=(SwiftSupport)
+  else
+    echo "   no embedded swift dylibs -> omitting SwiftSupport entirely"
+    rm -rf "$stage/SwiftSupport"
+  fi
+  ( cd "$stage" && rm -f Tetris.ipa && zip -qry Tetris.ipa "${zip_dirs[@]}" )
   c_green "Packaged $(du -h "$IPA_PATH" | cut -f1) -> $IPA_PATH"
 }
 
