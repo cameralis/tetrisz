@@ -9,6 +9,7 @@ import '../net/presence_client.dart';
 import '../net/profile_client.dart';
 import 'account_page.dart';
 import 'components.dart';
+import 'spectate_page.dart';
 import 'theme.dart';
 import 'toasts.dart';
 
@@ -340,6 +341,24 @@ class _FriendsPageState extends State<FriendsPage> {
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    if (_statuses[friend.uid] == FriendPresence.solo)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: TetrisButton(
+                          key: ValueKey('friend-watch-${friend.uid}'),
+                          variant: TetrisButtonVariant.danger,
+                          compact: true,
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => SpectatePage(
+                                friend: friend,
+                                hub: _hub,
+                              ),
+                            ),
+                          ),
+                          child: const Text('LIVE'),
+                        ),
+                      ),
                     if (_statuses[friend.uid] == FriendPresence.online ||
                         _statuses[friend.uid] == FriendPresence.solo)
                       Padding(

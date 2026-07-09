@@ -453,6 +453,9 @@ class _TetrisAppState extends State<TetrisApp> {
           'That friend is not online right now.',
           icon: Icons.info_outline_rounded,
         );
+      default:
+        // Spectate traffic is handled by the pages that own it.
+        break;
     }
   }
 
@@ -689,6 +692,8 @@ class _TetrisGamePageState extends State<TetrisGamePage>
   Timer? _countdownTailTimer;
   final List<_DustBurst> _dustBursts = [];
   final math.Random _dustRandom = math.Random();
+  Timer? _spectateTimer;
+  int _spectateSeq = 0;
 
   bool get _boardAcceptsInput =>
       !_game.paused && !_game.gameOver && !_lineClearAnimating;
@@ -734,6 +739,12 @@ class _TetrisGamePageState extends State<TetrisGamePage>
           ? FriendPresence.solo
           : FriendPresence.versus,
     );
+    // Solo play streams to spectating friends — but only while someone is
+    // actually watching, so idle rounds cost nothing.
+    if (widget.versusSession == null) {
+      PresenceHub.instance?.watcherCount.addListener(_syncSpectatePublishing);
+      _syncSpectatePublishing();
+    }
     final session = widget.versusSession;
     if (session != null) {
       _lastVersusPhase = session.phase.value;
@@ -822,6 +833,10 @@ class _TetrisGamePageState extends State<TetrisGamePage>
       unawaited(session.dispose());
     }
     _countdownTailTimer?.cancel();
+    _spectateTimer?.cancel();
+    PresenceHub.instance?.watcherCount.removeListener(
+      _syncSpectatePublishing,
+    );
     PresenceHub.instance?.setStatus(FriendPresence.online);
     _lineClearSnapImage?.dispose();
     _snapBackController.dispose();
@@ -1012,6 +1027,49 @@ class _TetrisGamePageState extends State<TetrisGamePage>
     }
     _lastVersusPhase = phase;
     setState(() {});
+  }
+
+  void _syncSpectatePublishing() {
+    final hub = PresenceHub.instance;
+    final shouldPublish =
+        hub != null && hub.watcherCount.value > 0 && mounted;
+    if (shouldPublish && _spectateTimer == null) {
+      _spectateTimer = Timer.periodic(
+        const Duration(milliseconds: 150),
+        (_) => _publishSpectateFrame(),
+      );
+      _publishSpectateFrame();
+    } else if (!shouldPublish) {
+      _spectateTimer?.cancel();
+      _spectateTimer = null;
+    }
+  }
+
+  void _publishSpectateFrame() {
+    final hub = PresenceHub.instance;
+    if (hub == null) {
+      return;
+    }
+    final active = _game.active;
+    _spectateSeq += 1;
+    final frame = BoardStateMsg(
+      seq: _spectateSeq,
+      cells: encodeVisibleBoard(_game),
+      active: active == null
+          ? null
+          : ActivePieceWire(
+              type: active.type,
+              rotation: active.rotation,
+              x: active.x,
+              y: active.y,
+            ),
+      pendingGarbage: 0,
+      score: _game.score,
+      lines: _game.lines,
+    ).encode();
+    // Level rides along for the spectator HUD; decoders ignore extras.
+    frame['level'] = _game.level;
+    hub.publishSpectate(frame);
   }
 
   /// Honest-client rated reporting: both players report their own outcome;

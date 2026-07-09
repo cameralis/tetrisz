@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -39,6 +40,28 @@ final class InviteFailed extends PresenceEvent {
   final String toUid;
 }
 
+/// Number of friends currently spectating this player changed.
+final class WatchedChanged extends PresenceEvent {
+  const WatchedChanged({required this.count});
+
+  final int count;
+}
+
+/// A board snapshot from the player being spectated.
+final class SpectateFrame extends PresenceEvent {
+  const SpectateFrame({required this.fromUid, required this.data});
+
+  final String fromUid;
+  final Object? data;
+}
+
+/// The spectated player's stream ended (disconnect / left solo play).
+final class SpectateEnded extends PresenceEvent {
+  const SpectateEnded({required this.fromUid});
+
+  final String fromUid;
+}
+
 /// Live connection to the presence hub; one per signed-in app instance.
 abstract interface class PresenceChannel {
   Stream<PresenceEvent> get events;
@@ -52,6 +75,14 @@ abstract interface class PresenceChannel {
     required bool accept,
     String? roomCode,
   });
+
+  /// Start/stop spectating a friend's solo play.
+  void watch(String uid);
+
+  void unwatch();
+
+  /// Publish one board frame to whoever is spectating this player.
+  void publishSpectate(Map<String, dynamic> frame);
 
   Future<void> close();
 }
@@ -159,6 +190,16 @@ class WsPresenceChannel implements PresenceChannel {
       'invite_failed' when decoded['to'] is String => InviteFailed(
         toUid: decoded['to'] as String,
       ),
+      'watched' when decoded['count'] is int => WatchedChanged(
+        count: decoded['count'] as int,
+      ),
+      'spec' when decoded['from'] is String => SpectateFrame(
+        fromUid: decoded['from'] as String,
+        data: decoded['d'],
+      ),
+      'spec_end' when decoded['from'] is String => SpectateEnded(
+        fromUid: decoded['from'] as String,
+      ),
       _ => null,
     };
     if (event != null) {
@@ -182,6 +223,16 @@ class WsPresenceChannel implements PresenceChannel {
 
   @override
   void sendInvite(String toUid) => _send({'t': 'invite', 'to': toUid});
+
+  @override
+  void watch(String uid) => _send({'t': 'watch', 'uid': uid});
+
+  @override
+  void unwatch() => _send({'t': 'unwatch'});
+
+  @override
+  void publishSpectate(Map<String, dynamic> frame) =>
+      _send({'t': 'spec_pub', 'd': frame});
 
   @override
   void respondInvite({
@@ -280,6 +331,9 @@ class PresenceHub {
   StreamSubscription<PresenceEvent>? _subscription;
   FriendPresence _status = FriendPresence.online;
 
+  /// How many friends are spectating this player right now.
+  final watcherCount = ValueNotifier<int>(0);
+
   Stream<PresenceEvent> get events => _events.stream;
 
   bool get connectedForSignedInUser => _channel != null;
@@ -289,11 +343,17 @@ class PresenceHub {
     if (signedIn && _channel == null) {
       final channel = _channelFactory(auth);
       _channel = channel;
-      _subscription = channel.events.listen(_events.add);
+      _subscription = channel.events.listen((event) {
+        if (event is WatchedChanged) {
+          watcherCount.value = event.count;
+        }
+        _events.add(event);
+      });
       channel.setStatus(_status);
     } else if (!signedIn && _channel != null) {
       final channel = _channel;
       _channel = null;
+      watcherCount.value = 0;
       unawaited(_subscription?.cancel());
       _subscription = null;
       unawaited(channel?.close());
@@ -317,4 +377,11 @@ class PresenceHub {
   }) {
     _channel?.respondInvite(toUid: toUid, accept: accept, roomCode: roomCode);
   }
+
+  void watch(String uid) => _channel?.watch(uid);
+
+  void unwatch() => _channel?.unwatch();
+
+  void publishSpectate(Map<String, dynamic> frame) =>
+      _channel?.publishSpectate(frame);
 }

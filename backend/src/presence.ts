@@ -2,12 +2,18 @@ import { DurableObject } from "cloudflare:workers";
 
 export type PresenceStatus = "online" | "solo" | "versus";
 
+interface PresenceEnv {
+  PLAYERS: DurableObjectNamespace;
+}
+
 interface Attachment {
   uid: string;
   status: PresenceStatus;
+  /** uid this socket is currently spectating, if any. */
+  watching?: string;
 }
 
-const MAX_MESSAGE_BYTES = 4 * 1024;
+const MAX_MESSAGE_BYTES = 8 * 1024;
 
 /**
  * Single global presence hub: one WebSocket per signed-in player while the
@@ -19,10 +25,13 @@ const MAX_MESSAGE_BYTES = 4 * 1024;
 export class PresenceDO extends DurableObject {
   constructor(ctx: DurableObjectState, env: unknown) {
     super(ctx, env as never);
+    this.presenceEnv = env as PresenceEnv;
     ctx.setWebSocketAutoResponse(
       new WebSocketRequestResponsePair('{"t":"ping"}', '{"t":"pong"}'),
     );
   }
+
+  private readonly presenceEnv: PresenceEnv;
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
@@ -134,9 +143,103 @@ export class PresenceDO extends DurableObject {
         }
         break;
       }
+      case "watch": {
+        const target = (parsed as { uid?: unknown }).uid;
+        if (typeof target !== "string" || target === me.uid) {
+          return;
+        }
+        // Only friends may spectate.
+        if (!(await this.areFriends(target, me.uid))) {
+          return;
+        }
+        this.stopWatching(ws, me);
+        ws.serializeAttachment({
+          ...me,
+          watching: target,
+        } satisfies Attachment);
+        this.notifyWatched(target);
+        break;
+      }
+      case "unwatch": {
+        this.stopWatching(ws, me);
+        break;
+      }
+      case "spec_pub": {
+        const frame = (parsed as { d?: unknown }).d;
+        if (frame === undefined) {
+          return;
+        }
+        for (const viewer of this.viewersOf(me.uid)) {
+          this.send(viewer, { t: "spec", from: me.uid, d: frame });
+        }
+        break;
+      }
       default:
         break;
     }
+  }
+
+  async webSocketClose(ws: WebSocket) {
+    const me = this.attachmentOf(ws);
+    if (me === null) {
+      return;
+    }
+    if (me.watching !== undefined) {
+      // Closed socket no longer counts as a viewer.
+      this.notifyWatched(me.watching, { excluding: ws });
+    }
+    // A watched player going away ends their viewers' streams.
+    for (const viewer of this.viewersOf(me.uid)) {
+      this.send(viewer, { t: "spec_end", from: me.uid });
+    }
+  }
+
+  private async areFriends(a: string, b: string): Promise<boolean> {
+    try {
+      const players = this.presenceEnv.PLAYERS.get(
+        this.presenceEnv.PLAYERS.idFromName("global"),
+      );
+      const response = await players.fetch("https://players/friends/list", {
+        method: "POST",
+        body: JSON.stringify({ uid: a }),
+      });
+      const { friends } = (await response.json()) as {
+        friends: { uid: string }[];
+      };
+      return friends.some((friend) => friend.uid === b);
+    } catch {
+      return false;
+    }
+  }
+
+  private stopWatching(ws: WebSocket, me: Attachment) {
+    if (me.watching === undefined) {
+      return;
+    }
+    const target = me.watching;
+    ws.serializeAttachment({
+      uid: me.uid,
+      status: me.status,
+    } satisfies Attachment);
+    this.notifyWatched(target);
+  }
+
+  private viewersOf(uid: string): WebSocket[] {
+    return this.ctx
+      .getWebSockets()
+      .filter(
+        (ws) =>
+          ws.readyState === WebSocket.READY_STATE_OPEN &&
+          this.attachmentOf(ws)?.watching === uid,
+      );
+  }
+
+  /** Tells the watched player how many viewers they currently have. */
+  private notifyWatched(uid: string, options?: { excluding?: WebSocket }) {
+    const count = this.viewersOf(uid).filter(
+      (ws) => ws !== options?.excluding,
+    ).length;
+    this.sendTo(uid, { t: "watched", count });
   }
 
   private statusOf(uid: string): PresenceStatus | "offline" {

@@ -12,6 +12,7 @@ import 'package:tetris/src/net/protocol.dart';
 import 'package:tetris/src/net/room_client.dart';
 import 'package:tetris/src/ui/friends_page.dart';
 import 'package:tetris/src/ui/lobby_page.dart';
+import 'package:tetris/src/ui/spectate_page.dart';
 import 'package:tetris/src/ui/tetris_app.dart';
 
 class FakePresenceChannel implements PresenceChannel {
@@ -19,6 +20,9 @@ class FakePresenceChannel implements PresenceChannel {
   final statuses = <FriendPresence>[];
   final invitesSent = <String>[];
   final responses = <({String toUid, bool accept, String? roomCode})>[];
+  final watched = <String>[];
+  int unwatches = 0;
+  final publishedFrames = <Map<String, dynamic>>[];
 
   @override
   Stream<PresenceEvent> get events => controller.stream;
@@ -37,6 +41,16 @@ class FakePresenceChannel implements PresenceChannel {
   }) {
     responses.add((toUid: toUid, accept: accept, roomCode: roomCode));
   }
+
+  @override
+  void watch(String uid) => watched.add(uid);
+
+  @override
+  void unwatch() => unwatches += 1;
+
+  @override
+  void publishSpectate(Map<String, dynamic> frame) =>
+      publishedFrames.add(frame);
 
   @override
   Future<void> close() async {
@@ -252,6 +266,104 @@ void main() {
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
+  });
+
+  testWidgets('solo play publishes frames only while someone watches', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final auth = FakeAuthService();
+    await auth.signInWithApple();
+    final channel = FakePresenceChannel();
+    final hub = _hubWith(auth, channel);
+    PresenceHub.install(hub);
+
+    await tester.pumpWidget(
+      const TetrisApp(enableAudio: false),
+    );
+    await tester.pump(const Duration(milliseconds: 1100));
+    await tester.tap(find.byKey(const ValueKey('home-play')));
+    await tester.pump(const Duration(milliseconds: 400));
+
+    // Nobody watching: no frames.
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(channel.publishedFrames, isEmpty);
+
+    // A friend starts watching.
+    channel.controller.add(const WatchedChanged(count: 1));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 700));
+    expect(channel.publishedFrames, isNotEmpty);
+    final frame = channel.publishedFrames.last;
+    expect(frame['cells'], isA<String>());
+    expect(frame['level'], isA<int>());
+
+    // The friend stops watching: publishing stops.
+    channel.controller.add(const WatchedChanged(count: 0));
+    await tester.pump();
+    final publishedBefore = channel.publishedFrames.length;
+    await tester.pump(const Duration(milliseconds: 700));
+    expect(channel.publishedFrames.length, publishedBefore);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
+  testWidgets('spectate page renders frames and the stream-ended state', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final auth = FakeAuthService();
+    await auth.signInWithApple();
+    final channel = FakePresenceChannel();
+    final hub = _hubWith(auth, channel);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SpectatePage(
+          friend: const Friend(
+            uid: 'u-star',
+            displayName: 'STAR',
+            friendCode: 'SSSSSS',
+            rating: 1300,
+          ),
+          hub: hub,
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(channel.watched, ['u-star']);
+    expect(find.text('Waiting for the live board…'), findsOneWidget);
+
+    channel.controller.add(
+      SpectateFrame(
+        fromUid: 'u-star',
+        data: BoardStateMsg(
+          seq: 1,
+          cells: '.' * 200,
+          active: null,
+          pendingGarbage: 0,
+          score: 4321,
+          lines: 7,
+        ).encode()
+          ..['level'] = 3,
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(
+      find.text('SCORE 4321 · LEVEL 3 · LINES 7'),
+      findsOneWidget,
+    );
+
+    channel.controller.add(const SpectateEnded(fromUid: 'u-star'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.byKey(const ValueKey('spectate-ended')), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+    expect(channel.unwatches, 1);
   });
 
   testWidgets('the accepted event joins the inviter into the room', (

@@ -147,6 +147,53 @@ describe("presence", () => {
     expect(failed.to).toBe("pr-nobody");
   });
 
+  it("spectate: friends watch, strangers are ignored", async () => {
+    await befriend("sp-star", "sp-fan");
+    const star = await connect("sp-star");
+    const fan = await connect("sp-fan");
+    const stranger = await connect("sp-stranger");
+
+    fan.ws.send(JSON.stringify({ t: "watch", uid: "sp-star" }));
+    const watched = await star.next("watched");
+    expect(watched.count).toBe(1);
+
+    // A stranger's watch is silently ignored.
+    stranger.ws.send(JSON.stringify({ t: "watch", uid: "sp-star" }));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    star.ws.send(
+      JSON.stringify({ t: "spec_pub", d: { score: 1200, cells: "...." } }),
+    );
+    const frame = await fan.next("spec");
+    expect(frame.from).toBe("sp-star");
+    expect((frame.d as { score: number }).score).toBe(1200);
+    expect(stranger.messages.filter((m) => m.t === "spec")).toHaveLength(0);
+
+    fan.ws.send(JSON.stringify({ t: "unwatch" }));
+    // The first `watched` was count 1; after unwatch a count-0 arrives.
+    const deadline = Date.now() + 2000;
+    const counts = () =>
+      star.messages.filter((m) => m.t === "watched").map((m) => m.count);
+    while (!counts().includes(0)) {
+      if (Date.now() > deadline) {
+        throw new Error(`timed out waiting for count 0; saw ${counts()}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  });
+
+  it("spectate: the stream ends when the watched player disconnects", async () => {
+    await befriend("sp-a", "sp-b");
+    const a = await connect("sp-a");
+    const b = await connect("sp-b");
+    b.ws.send(JSON.stringify({ t: "watch", uid: "sp-a" }));
+    await a.next("watched");
+
+    a.ws.close();
+    const end = await b.next("spec_end");
+    expect(end.from).toBe("sp-a");
+  });
+
   it("routes declines", async () => {
     const dave = await connect("pr-dave");
     const erin = await connect("pr-erin");
