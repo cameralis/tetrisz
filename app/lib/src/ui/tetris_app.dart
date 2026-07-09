@@ -15,8 +15,10 @@ import '../input/control_bindings.dart';
 import '../input/das_repeater.dart';
 import '../input/gamepad_service.dart';
 import '../input/gamepad_ui_navigator.dart';
+import '../auth/auth_service.dart';
 import '../net/leaderboard_client.dart';
 import '../net/protocol.dart';
+import '../net/rankings_client.dart';
 import '../net/versus_session.dart';
 import '../platform_support.dart';
 import 'board_painting.dart';
@@ -455,6 +457,7 @@ class TetrisGamePage extends StatefulWidget {
     this.haptics,
     this.gamepad,
     this.versusSession,
+    this.rankingsApi,
   });
 
   final bool enableAudio;
@@ -470,6 +473,10 @@ class TetrisGamePage extends StatefulWidget {
   /// persistence and pause are disabled, and versus overlays render on top of
   /// the board.
   final VersusSession? versusSession;
+
+  /// Rated-result reporting; defaults to the real backend client. Tests
+  /// inject a fake.
+  final RankingsApi? rankingsApi;
 
   @override
   State<TetrisGamePage> createState() => _TetrisGamePageState();
@@ -845,8 +852,49 @@ class _TetrisGamePageState extends State<TetrisGamePage>
         }
       });
     }
+    if (_lastVersusPhase != phase &&
+        (phase == VersusPhase.won || phase == VersusPhase.lost)) {
+      unawaited(_reportRatedResult(phase == VersusPhase.won));
+    }
     _lastVersusPhase = phase;
     setState(() {});
+  }
+
+  /// Honest-client rated reporting: both players report their own outcome;
+  /// the backend rates the match once the reports pair up. Signed-out play
+  /// stays unrated. The first reporter polls once more to pick up the delta.
+  Future<void> _reportRatedResult(bool won) async {
+    final session = widget.versusSession;
+    if (session == null || Auth.instance.account.value == null) {
+      return;
+    }
+    final api = widget.rankingsApi ?? HttpRankingsApi(auth: Auth.instance);
+    final matchId = session.matchId;
+    try {
+      for (var attempt = 0; attempt < 3; attempt += 1) {
+        final outcome = await api.reportResult(
+          roomCode: session.room.code,
+          matchId: matchId,
+          won: won,
+        );
+        if (outcome.status == ReportStatus.rated) {
+          if (mounted && session.matchId == matchId) {
+            session.ratingDelta.value = outcome.ratingDelta;
+          }
+          return;
+        }
+        if (outcome.status == ReportStatus.discarded) {
+          return;
+        }
+        await Future<void>.delayed(const Duration(seconds: 2));
+        if (!mounted || session.matchId != matchId) {
+          return;
+        }
+      }
+    } catch (_) {
+      // Rated results are best-effort; the match outcome itself already
+      // rendered.
+    }
   }
 
   /// Room lifecycle toasts during a match; the session itself handles the

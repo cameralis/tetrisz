@@ -111,6 +111,49 @@ export default {
       return json({ error: "method_not_allowed" }, 405);
     }
 
+    if (url.pathname === "/api/versus/result" && request.method === "POST") {
+      const user = await verifyFirebaseToken(
+        request.headers.get("Authorization"),
+        env,
+      );
+      if (user === null) {
+        return json({ error: "unauthorized" }, 401);
+      }
+      const body = (await request.json().catch(() => ({}))) as {
+        roomCode?: unknown;
+        matchId?: unknown;
+        outcome?: unknown;
+      };
+      const stub = env.PLAYERS.get(env.PLAYERS.idFromName("global"));
+      const response = await stub.fetch("https://players/report-result", {
+        method: "POST",
+        body: JSON.stringify({
+          uid: user.uid,
+          roomCode:
+            typeof body.roomCode === "string"
+              ? body.roomCode.toUpperCase()
+              : undefined,
+          matchId: body.matchId,
+          outcome: body.outcome,
+        }),
+      });
+      return withCors(response);
+    }
+
+    if (url.pathname === "/api/rankings" && request.method === "GET") {
+      // Rankings are public; a valid token additionally returns your rank.
+      const user = await verifyFirebaseToken(
+        request.headers.get("Authorization"),
+        env,
+      );
+      const stub = env.PLAYERS.get(env.PLAYERS.idFromName("global"));
+      const response = await stub.fetch("https://players/rankings", {
+        method: "POST",
+        body: JSON.stringify({ uid: user?.uid }),
+      });
+      return withCors(response);
+    }
+
     if (url.pathname === "/api/rooms" && request.method === "POST") {
       for (let attempt = 0; attempt < CREATE_ATTEMPTS; attempt += 1) {
         const code = generateCode();

@@ -636,6 +636,30 @@ class _VersusResultPanelState extends State<VersusResultPanel>
             ),
           ),
         ),
+        ValueListenableBuilder<int?>(
+          valueListenable: widget.session.ratingDelta,
+          builder: (context, delta, _) {
+            if (delta == null) {
+              return const SizedBox.shrink();
+            }
+            final positive = delta >= 0;
+            return Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                'RATING ${positive ? '+' : '−'}${delta.abs()}',
+                key: const ValueKey('versus-rating-delta'),
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: positive ? const Color(0xFF58D957) : _garbageColor,
+                  fontSize: 13,
+                  letterSpacing: 1.2,
+                  fontWeight: FontWeight.w800,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            );
+          },
+        ),
         const SizedBox(height: 16),
         if (canRematch) ...[
           ValueListenableBuilder<bool>(

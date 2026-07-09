@@ -66,6 +66,10 @@ class VersusSession {
   final wins = ValueNotifier<int>(0);
   final losses = ValueNotifier<int>(0);
 
+  /// Rating change of the last finished match, set by the UI layer once the
+  /// backend confirms the rated result; null while unknown/unrated.
+  final ratingDelta = ValueNotifier<int?>(null);
+
   static const _stateSendInterval = Duration(milliseconds: 150);
 
   StreamSubscription<ServerEnvelope>? _envelopeSubscription;
@@ -139,6 +143,7 @@ class VersusSession {
     localWantsRematch.dispose();
     wins.dispose();
     losses.dispose();
+    ratingDelta.dispose();
     gameNotifier.dispose();
   }
 
@@ -242,6 +247,7 @@ class VersusSession {
     opponent.value = null;
     opponentWantsRematch.value = false;
     localWantsRematch.value = false;
+    ratingDelta.value = null;
     gameNotifier.value = _newGame(start.seed);
     _startCountdown();
   }

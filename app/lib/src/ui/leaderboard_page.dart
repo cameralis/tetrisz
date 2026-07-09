@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../auth/auth_service.dart';
 import '../net/leaderboard_client.dart';
+import '../net/rankings_client.dart';
 import 'components.dart';
 import 'theme.dart';
 import 'toasts.dart';
@@ -11,11 +13,15 @@ import 'toasts.dart';
 const tetrisPlayerNamePreferenceKey = 'tetris.playerName';
 const _highScorePreferenceKey = 'tetris.highScore';
 
-/// Global top-50 with a display-name setting. Scores are auto-submitted on
-/// single-player game over once a name is set; the button here retroactively
-/// submits the stored personal best.
+enum _Board { soloScores, versusRating }
+
+/// Global boards: solo top-50 scores (name-keyed, auto-submitted on game
+/// over) and the versus ELO ranking for signed-in players.
 class LeaderboardPage extends StatefulWidget {
-  const LeaderboardPage({super.key});
+  const LeaderboardPage({super.key, this.rankingsApi});
+
+  /// Defaults to the real backend client; tests inject a fake.
+  final RankingsApi? rankingsApi;
 
   @override
   State<LeaderboardPage> createState() => _LeaderboardPageState();
@@ -23,8 +29,12 @@ class LeaderboardPage extends StatefulWidget {
 
 class _LeaderboardPageState extends State<LeaderboardPage> {
   final _client = LeaderboardClient();
+  late final RankingsApi _rankings =
+      widget.rankingsApi ?? HttpRankingsApi(auth: Auth.instance);
   final _nameController = TextEditingController();
   Future<LeaderboardSnapshot>? _snapshotFuture;
+  Future<RankingsSnapshot>? _rankingsFuture;
+  _Board _board = _Board.soloScores;
   int _highScore = 0;
   bool _submittingBest = false;
 
@@ -32,6 +42,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
   void initState() {
     super.initState();
     _snapshotFuture = _client.fetch();
+    // Rankings load lazily on first opening that board.
     unawaited(_loadPreferences());
   }
 
@@ -66,6 +77,18 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
   void _refresh() {
     setState(() {
       _snapshotFuture = _client.fetch();
+      if (_rankingsFuture != null) {
+        _rankingsFuture = _rankings.fetchRankings();
+      }
+    });
+  }
+
+  void _openBoard(_Board board) {
+    setState(() {
+      _board = board;
+      if (board == _Board.versusRating) {
+        _rankingsFuture ??= _rankings.fetchRankings();
+      }
     });
   }
 
@@ -133,32 +156,66 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
               child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
-                    child: TetrisTextField(
-                      controller: _nameController,
-                      maxLength: 16,
-                      label: 'Display name',
-                      helper: 'Scores submit automatically on game over',
-                      onChanged: (value) => unawaited(_saveName(value)),
+                    child: TetrisButton(
+                      key: const ValueKey('board-solo'),
+                      compact: true,
+                      variant: _board == _Board.soloScores
+                          ? TetrisButtonVariant.primary
+                          : TetrisButtonVariant.secondary,
+                      onPressed: () => _openBoard(_Board.soloScores),
+                      child: const Text('Solo scores'),
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
+                  const SizedBox(width: 8),
+                  Expanded(
                     child: TetrisButton(
-                      variant: TetrisButtonVariant.primary,
+                      key: const ValueKey('board-versus'),
                       compact: true,
-                      onPressed: _submittingBest ? null : _submitBest,
-                      child: Text(_submittingBest ? '…' : 'Submit best'),
+                      variant: _board == _Board.versusRating
+                          ? TetrisButtonVariant.primary
+                          : TetrisButtonVariant.secondary,
+                      onPressed: () => _openBoard(_Board.versusRating),
+                      child: const Text('Versus rating'),
                     ),
                   ),
                 ],
               ),
             ),
+            if (_board == _Board.soloScores)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: TetrisTextField(
+                        controller: _nameController,
+                        maxLength: 16,
+                        label: 'Display name',
+                        helper: 'Scores submit automatically on game over',
+                        onChanged: (value) => unawaited(_saveName(value)),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: TetrisButton(
+                        variant: TetrisButtonVariant.primary,
+                        compact: true,
+                        onPressed: _submittingBest ? null : _submitBest,
+                        child: Text(_submittingBest ? '…' : 'Submit best'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (_board == _Board.versusRating)
+              Expanded(child: _buildRankings()),
+            if (_board == _Board.soloScores)
             Expanded(
               child: FutureBuilder<LeaderboardSnapshot>(
                 future: _snapshotFuture,
@@ -270,6 +327,152 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildRankings() {
+    return FutureBuilder<RankingsSnapshot>(
+      future: _rankingsFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(
+            child: CircularProgressIndicator(color: TetrisColors.accent),
+          );
+        }
+        if (snapshot.hasError) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(
+                'Could not load the rankings.\n${snapshot.error}',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: TetrisColors.danger,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+          );
+        }
+        final data = snapshot.data!;
+        if (data.entries.isEmpty) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Text(
+                'No rated matches yet.\nSign in and win 1v1 games to get '
+                'ranked!',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: TetrisColors.mutedText, height: 1.5),
+              ),
+            ),
+          );
+        }
+        return Column(
+          children: [
+            if (data.yourRank != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 2, 16, 6),
+                child: TetrisPanel(
+                  color: Color.lerp(
+                    TetrisColors.panel,
+                    TetrisColors.accent,
+                    0.12,
+                  )!,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  child: Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'YOUR RANK',
+                          style: TextStyle(
+                            color: TetrisColors.mutedText,
+                            fontSize: 11,
+                            letterSpacing: 1.2,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '#${data.yourRank} · ${data.yourRating}',
+                        key: const ValueKey('rankings-your-rank'),
+                        style: const TextStyle(
+                          color: TetrisColors.text,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 6,
+                ),
+                itemCount: data.entries.length,
+                itemBuilder: (context, index) {
+                  final entry = data.entries[index];
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: TetrisPanel(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 40,
+                            child: Text(
+                              '#${entry.rank}',
+                              style: TextStyle(
+                                color: entry.rank <= 3
+                                    ? TetrisColors.accent
+                                    : TetrisColors.mutedText,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures(),
+                                ],
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: Text(
+                              entry.displayName,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: TetrisColors.text,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            '${entry.rating}',
+                            style: const TextStyle(
+                              color: TetrisColors.text,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              fontFeatures: [FontFeature.tabularFigures()],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
