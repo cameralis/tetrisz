@@ -20,6 +20,15 @@ class AuthUnavailableException implements Exception {
       'docs/firebase-setup.md';
 }
 
+/// Thrown when the player dismisses the platform sign-in sheet. Callers treat
+/// this as a no-op rather than an error.
+class AuthCancelledException implements Exception {
+  const AuthCancelledException();
+
+  @override
+  String toString() => 'Sign-in cancelled';
+}
+
 /// Injectable auth backend. Production will use a Firebase implementation
 /// once the project is configured; tests and local dev use [FakeAuthService].
 abstract interface class AuthService {

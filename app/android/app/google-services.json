@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "249079443387",
+    "project_id": "tetrisz-app",
+    "storage_bucket": "tetrisz-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:249079443387:android:d077189fc3a62a1f5ade9e",
+        "android_client_info": {
+          "package_name": "com.szabi.tetris"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "249079443387-c8besaonuvvss2ndpsibgr54c4l8fdl3.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.szabi.tetris",
+            "certificate_hash": "81c8103ac37ed49d30aa18cb0abcd6f57dbf3412"
+          }
+        },
+        {
+          "client_id": "249079443387-p8as0spvcbnnu402ukefqst3bbaj74ng.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD2b1l6Gm92UjUSWN4FeSuAGXItXjZHVuA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "249079443387-p8as0spvcbnnu402ukefqst3bbaj74ng.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "249079443387-9729uos2iii27dm4uo82a08ij41no589.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "one.tear.tetrisz"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

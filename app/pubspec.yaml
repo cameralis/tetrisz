@@ -40,6 +40,11 @@ dependencies:
   http: ^1.6.0
   flutter_webrtc: ^1.5.2
   gamepads: ^0.1.10+4
+  firebase_core: ^4.11.0
+  firebase_auth: ^6.5.4
+  google_sign_in: ^7.2.0
+  sign_in_with_apple: ^8.1.0
+  crypto: ^3.0.7
 
 dev_dependencies:
   flutter_test:

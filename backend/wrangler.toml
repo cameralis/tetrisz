@@ -35,9 +35,7 @@ tag = "v4"
 new_sqlite_classes = ["PresenceDO"]
 
 [vars]
-# Set to the real Firebase project id once the project exists (see
-# docs/firebase-setup.md). Empty disables all authenticated routes.
-FIREBASE_PROJECT_ID = ""
+FIREBASE_PROJECT_ID = "tetrisz-app"
 
 [observability]
 enabled = true

@@ -62,6 +62,8 @@ class _AccountPageState extends State<AccountPage> {
     setState(() => _signingIn = true);
     try {
       await attempt();
+    } on AuthCancelledException {
+      // Dismissing the sheet is not a failure worth reporting.
     } on AuthUnavailableException catch (error) {
       TetrisToastHost.show(
         '$error',
@@ -130,6 +132,7 @@ class _AccountPageState extends State<AccountPage> {
               key: const ValueKey('account-email'),
               controller: emailController,
               label: 'Email',
+              autofocus: true,
             ),
             const SizedBox(height: 10),
             TetrisTextField(
@@ -219,6 +222,9 @@ class _AccountPageState extends State<AccountPage> {
         const SizedBox(height: 28),
         TetrisButton(
           key: const ValueKey('account-signin-apple'),
+          // Pre-focused so a controller lands on a selection when the page
+          // opens.
+          autofocus: true,
           icon: Icons.apple_rounded,
           onPressed: _signingIn
               ? null
@@ -281,6 +287,7 @@ class _AccountPageState extends State<AccountPage> {
               ),
               const SizedBox(height: 14),
               TetrisButton(
+                autofocus: true,
                 compact: true,
                 onPressed: _onAccountChanged,
                 child: const Text('Retry'),
@@ -312,6 +319,9 @@ class _AccountPageState extends State<AccountPage> {
                   padding: const EdgeInsets.only(top: 6),
                   child: TetrisButton(
                     key: const ValueKey('account-save-name'),
+                    // Controller seed for the signed-in layout; focusing the
+                    // name field instead would pop the keyboard on mobile.
+                    autofocus: true,
                     variant: TetrisButtonVariant.primary,
                     compact: true,
                     onPressed: _savingName ? null : () => unawaited(_saveName()),
