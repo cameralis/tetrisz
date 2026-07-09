@@ -162,6 +162,9 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
                   Expanded(
                     child: TetrisButton(
                       key: const ValueKey('board-solo'),
+                      // Pre-focused so a controller lands on a selection on
+                      // entry.
+                      autofocus: true,
                       compact: true,
                       variant: _board == _Board.soloScores
                           ? TetrisButtonVariant.primary

@@ -114,6 +114,8 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
             const TetrisSectionHeader('CONTROLS'),
             TetrisListTile(
               key: const ValueKey('open-controls'),
+              // Pre-focused so a controller lands on a selection on entry.
+              autofocus: true,
               leading: const Icon(
                 Icons.sports_esports,
                 color: TetrisColors.accent,

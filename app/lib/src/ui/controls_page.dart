@@ -212,6 +212,8 @@ class _ControlsPageState extends State<ControlsPage> {
             for (final action in GameAction.values)
               _GamepadActionTile(
                 action: action,
+                // Pre-focused so a controller lands on a selection on entry.
+                autofocus: action == GameAction.values.first,
                 controls: _gamepadBindings.controlsFor(action),
                 captureEnabled: widget.gamepad != null,
                 onCapture: () => unawaited(_captureBinding(action)),
@@ -354,6 +356,7 @@ class _BindingCaptureDialogState extends State<_BindingCaptureDialog> {
 class _GamepadActionTile extends StatelessWidget {
   const _GamepadActionTile({
     required this.action,
+    this.autofocus = false,
     required this.controls,
     required this.captureEnabled,
     required this.onCapture,
@@ -361,6 +364,7 @@ class _GamepadActionTile extends StatelessWidget {
   });
 
   final GameAction action;
+  final bool autofocus;
   final List<GamepadControl> controls;
   final bool captureEnabled;
   final VoidCallback onCapture;
@@ -370,6 +374,7 @@ class _GamepadActionTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return TetrisListTile(
       key: ValueKey('gamepad-action-${action.name}'),
+      autofocus: autofocus,
       onTap: captureEnabled ? onCapture : null,
       title: Text(action.label),
       subtitle: controls.isEmpty
@@ -381,17 +386,10 @@ class _GamepadActionTile extends StatelessWidget {
                 runSpacing: 6,
                 children: [
                   for (final control in controls)
-                    InputChip(
+                    _BindingChip(
                       key: ValueKey('binding-${action.name}-${control.name}'),
-                      label: Text(control.label),
-                      labelStyle: const TextStyle(
-                        color: TetrisColors.text,
-                        fontSize: 11,
-                      ),
-                      backgroundColor: TetrisColors.panelRaised,
-                      side: const BorderSide(color: Color(0x22FFFFFF)),
-                      deleteIconColor: TetrisColors.mutedText,
-                      onDeleted: () => onUnbind(control),
+                      label: control.label,
+                      onRemoved: () => onUnbind(control),
                     ),
                 ],
               ),
@@ -399,6 +397,53 @@ class _GamepadActionTile extends StatelessWidget {
       trailing: Icon(
         Icons.add_circle_outline,
         color: captureEnabled ? TetrisColors.accent : TetrisColors.mutedText,
+      ),
+    );
+  }
+}
+
+/// Removable binding tag. A [TetrisPressable] rather than an [InputChip] so a
+/// controller can focus it and press South to unbind — InputChip's delete
+/// affordance is pointer-only.
+class _BindingChip extends StatelessWidget {
+  const _BindingChip({super.key, required this.label, required this.onRemoved});
+
+  final String label;
+  final VoidCallback onRemoved;
+
+  @override
+  Widget build(BuildContext context) {
+    return TetrisPressable(
+      onPressed: onRemoved,
+      semanticLabel: 'Remove $label binding',
+      builder: (context, state) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: TetrisColors.panelRaised,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: state.focused
+                ? TetrisColors.accent
+                : const Color(0x22FFFFFF),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(color: TetrisColors.text, fontSize: 11),
+            ),
+            const SizedBox(width: 5),
+            Icon(
+              Icons.close_rounded,
+              size: 13,
+              color: state.hovered || state.focused
+                  ? TetrisColors.text
+                  : TetrisColors.mutedText,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -479,19 +524,12 @@ class _KeyboardActionTile extends StatelessWidget {
                 runSpacing: 6,
                 children: [
                   for (final key in keys)
-                    InputChip(
+                    _BindingChip(
                       key: ValueKey(
                         'key-binding-${action.name}-${key.keyId}',
                       ),
-                      label: Text(describeLogicalKey(key)),
-                      labelStyle: const TextStyle(
-                        color: TetrisColors.text,
-                        fontSize: 11,
-                      ),
-                      backgroundColor: TetrisColors.panelRaised,
-                      side: const BorderSide(color: Color(0x22FFFFFF)),
-                      deleteIconColor: TetrisColors.mutedText,
-                      onDeleted: () => onUnbind(key),
+                      label: describeLogicalKey(key),
+                      onRemoved: () => onUnbind(key),
                     ),
                 ],
               ),
@@ -515,43 +553,76 @@ class _TouchGestureTile extends StatelessWidget {
   final GameAction? action;
   final ValueChanged<GameAction?> onChanged;
 
-  @override
-  Widget build(BuildContext context) {
-    return TetrisPanel(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              gesture.label,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: TetrisColors.text, fontSize: 14),
-            ),
-          ),
-          DropdownButton<GameAction?>(
-            key: ValueKey('touch-gesture-${gesture.name}'),
-            value: action,
-            hint: const Text(
-              'None',
-              style: TextStyle(color: TetrisColors.mutedText, fontSize: 13),
-            ),
-            dropdownColor: TetrisColors.panel,
-            style: const TextStyle(color: TetrisColors.text, fontSize: 13),
-            underline: const SizedBox.shrink(),
-            isDense: true,
-            items: [
-              const DropdownMenuItem<GameAction?>(
-                value: null,
-                child: Text('None'),
-              ),
-              for (final candidate in GameAction.values)
-                DropdownMenuItem<GameAction?>(
-                  value: candidate,
-                  child: Text(candidate.label),
+  Future<void> _pickAction(BuildContext context) async {
+    // A themed dialog of focusable options instead of a DropdownButton: the
+    // Material dropdown's popup route is not reachable through the gamepad
+    // focus navigator.
+    final picked = await showDialog<(GameAction?,)>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: TetrisColors.panel,
+        title: Text(
+          gesture.label,
+          style: const TextStyle(color: TetrisColors.text, fontSize: 16),
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final candidate in <GameAction?>[
+                null,
+                ...GameAction.values,
+              ])
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: TetrisButton(
+                    key: ValueKey(
+                      'touch-pick-${gesture.name}-${candidate?.name ?? 'none'}',
+                    ),
+                    compact: true,
+                    autofocus: candidate == action,
+                    variant: candidate == action
+                        ? TetrisButtonVariant.primary
+                        : TetrisButtonVariant.ghost,
+                    onPressed: () =>
+                        Navigator.of(context).pop((candidate,)),
+                    child: Text(candidate?.label ?? 'None'),
+                  ),
                 ),
             ],
-            onChanged: onChanged,
+          ),
+        ),
+      ),
+    );
+    if (picked != null) {
+      onChanged(picked.$1);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TetrisListTile(
+      key: ValueKey('touch-gesture-${gesture.name}'),
+      onTap: () => unawaited(_pickAction(context)),
+      title: Text(gesture.label),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            action?.label ?? 'None',
+            style: TextStyle(
+              color: action == null
+                  ? TetrisColors.mutedText
+                  : TetrisColors.accent,
+              fontSize: 13,
+            ),
+          ),
+          const SizedBox(width: 6),
+          const Icon(
+            Icons.unfold_more_rounded,
+            size: 16,
+            color: TetrisColors.mutedText,
           ),
         ],
       ),

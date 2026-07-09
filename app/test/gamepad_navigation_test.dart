@@ -230,7 +230,15 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(gamepad.service.uiNavigationBlocked, isFalse);
-    await tester.tap(find.byKey(const ValueKey('gamepad-action-hold')));
+    // Tap the tile's title: the binding chips in the subtitle are themselves
+    // pressable now (press removes the binding), so the tile's center is no
+    // longer a safe tap target.
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey('gamepad-action-hold')),
+        matching: find.text('Hold'),
+      ),
+    );
     await tester.pumpAndSettle();
     expect(gamepad.service.uiNavigationBlocked, isTrue);
 

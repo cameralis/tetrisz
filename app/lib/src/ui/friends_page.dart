@@ -210,6 +210,8 @@ class _FriendsPageState extends State<FriendsPage> {
             const SizedBox(height: 20),
             TetrisButton(
               key: const ValueKey('friends-goto-account'),
+              // Pre-focused so a controller lands on a selection on entry.
+              autofocus: true,
               variant: TetrisButtonVariant.primary,
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute<void>(builder: (_) => const AccountPage()),
@@ -246,6 +248,7 @@ class _FriendsPageState extends State<FriendsPage> {
                 ),
                 const SizedBox(height: 12),
                 TetrisButton(
+                  autofocus: true,
                   compact: true,
                   onPressed: _reload,
                   child: const Text('Retry'),
@@ -297,6 +300,9 @@ class _FriendsPageState extends State<FriendsPage> {
                   padding: const EdgeInsets.only(top: 6),
                   child: TetrisButton(
                     key: const ValueKey('friends-add'),
+                    // Controller seed for the signed-in layout; focusing the
+                    // code field instead would pop the keyboard on mobile.
+                    autofocus: true,
                     variant: TetrisButtonVariant.primary,
                     compact: true,
                     onPressed: _adding ? null : () => unawaited(_addFriend()),

@@ -584,9 +584,11 @@ class TetrisListTile extends StatelessWidget {
     this.subtitle,
     this.trailing,
     this.margin = const EdgeInsets.only(bottom: 8),
+    this.autofocus = false,
   });
 
   final VoidCallback? onTap;
+  final bool autofocus;
   final Widget? leading;
   final Widget title;
   final Widget? subtitle;
@@ -644,6 +646,7 @@ class TetrisListTile extends StatelessWidget {
       padding: margin,
       child: TetrisPressable(
         onPressed: onTap,
+        autofocus: autofocus,
         builder: (context, state) {
           return Transform.scale(
             scale: lerpDouble(1.0, 0.985, state.depth.clamp(0.0, 1.0))!,

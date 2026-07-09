@@ -80,6 +80,19 @@ class _SpectatePageState extends State<SpectatePage> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.transparent,
+        // Themed, pre-focused back control: it is the only interactive
+        // element while the stream is live, and the Material auto-leading is
+        // never seeded for controller navigation.
+        leading: Center(
+          child: TetrisIconButton(
+            key: const ValueKey('spectate-back'),
+            autofocus: true,
+            icon: Icons.arrow_back_rounded,
+            size: 40,
+            tooltip: 'Back',
+            onPressed: () => Navigator.of(context).maybePop(),
+          ),
+        ),
         title: Text(
           'Watching ${widget.friend.displayName}',
           style: const TextStyle(color: TetrisColors.text, fontSize: 17),
